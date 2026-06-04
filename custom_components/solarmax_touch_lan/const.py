@@ -605,7 +605,7 @@ SENSOR_DEFINITIONS = [
 # (key, name, register, data_type, min, max, step, unit, mode)
 NUMBER_DEFINITIONS = [
     {
-        "key": "max_battery_charging_power",
+        "key": "battery_charging_max_power",        # matches sensor key
         "name": "Max Battery Charging Power",
         "register": 8472,
         "data_type": "uint16",
@@ -615,7 +615,7 @@ NUMBER_DEFINITIONS = [
         "unit": "W",
     },
     {
-        "key": "max_grid_charging_power",
+        "key": "maximum_grid_charging_power",        # matches sensor key
         "name": "Max Grid Charging Power",
         "register": 8470,
         "data_type": "uint16",
@@ -625,7 +625,7 @@ NUMBER_DEFINITIONS = [
         "unit": "W",
     },
     {
-        "key": "stop_grid_charging_soc",
+        "key": "stop_grid_charging_battery_soc",     # matches sensor key
         "name": "Stop Grid Charging Battery SOC",
         "register": 8471,
         "data_type": "uint16",
@@ -635,7 +635,7 @@ NUMBER_DEFINITIONS = [
         "unit": "%",
     },
     {
-        "key": "max_solar_charging_stop_soc",
+        "key": "battery_stop_charging_maximum_soc",  # matches sensor key
         "name": "Max Solar Charging Stop SOC",
         "register": 8473,
         "data_type": "uint16",
@@ -645,7 +645,7 @@ NUMBER_DEFINITIONS = [
         "unit": "%",
     },
     {
-        "key": "on_grid_discharging_stop_soc",
+        "key": "discharge_end_soc_on_grid",          # matches sensor key
         "name": "On Grid Discharging Stop SOC",
         "register": 8522,
         "data_type": "uint16",
@@ -655,7 +655,7 @@ NUMBER_DEFINITIONS = [
         "unit": "%",
     },
     {
-        "key": "battery_discharge_end_soc",
+        "key": "discharge_end_soc_on_battery",       # matches sensor key
         "name": "Battery Discharge End SOC",
         "register": 8475,
         "data_type": "uint16",
@@ -665,7 +665,7 @@ NUMBER_DEFINITIONS = [
         "unit": "%",
     },
     {
-        "key": "max_grid_export_power",
+        "key": "max_grid_export_power",              # matches sensor key
         "name": "Max Grid Export Power",
         "register": 12473,
         "data_type": "uint32",
@@ -675,7 +675,7 @@ NUMBER_DEFINITIONS = [
         "unit": "W",
     },
     {
-        "key": "smart_load_turn_on_soc",
+        "key": "smart_load_turn_on_battery_soc",     # matches sensor key
         "name": "Smart Load Turn ON Battery SOC",
         "register": 8492,
         "data_type": "uint16",
@@ -685,7 +685,7 @@ NUMBER_DEFINITIONS = [
         "unit": "%",
     },
     {
-        "key": "smart_load_turn_off_soc",
+        "key": "smart_load_turn_off_battery_soc",    # matches sensor key
         "name": "Smart Load Turn OFF Battery SOC",
         "register": 8493,
         "data_type": "uint16",

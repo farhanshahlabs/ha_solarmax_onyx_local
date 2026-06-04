@@ -34,7 +34,7 @@ class SolarTouchNumber(NumberEntity):
     ) -> None:
         self._coordinator = coordinator
         self._defn = defn
-        self._attr_unique_id = f"{entry.entry_id}_{defn['key']}"
+        self._attr_unique_id = f"{entry.entry_id}_number_{defn['register']}"
         self._attr_name = defn["name"]
         self._attr_native_min_value = defn["min"]
         self._attr_native_max_value = defn["max"]
