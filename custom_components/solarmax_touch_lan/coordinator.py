@@ -72,7 +72,16 @@ class SolarTouchLANCoordinator:
             await self._async_connect()
             self._start_polling()
         else:
-            self.status = STATUS_STANDBY
+            # Standby mode: do one-shot fetch to populate initial values, then disconnect
+            self.status = STATUS_CONNECTING
+            try:
+                await self.client.async_connect()
+                await self._async_poll_all()
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                await self.client.async_disconnect()
+                self.status = STATUS_STANDBY
 
         if self._daily_sync:
             self._schedule_next_cloud_sync()
