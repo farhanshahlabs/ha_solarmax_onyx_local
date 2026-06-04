@@ -24,7 +24,7 @@ async def async_setup_entry(
 class SolarTouchNumber(NumberEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
-    _attr_mode = NumberMode.BOX
+    _attr_mode = NumberMode.SLIDER
 
     def __init__(
         self,
