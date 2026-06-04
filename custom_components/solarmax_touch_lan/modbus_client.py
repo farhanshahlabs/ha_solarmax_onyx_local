@@ -63,7 +63,7 @@ class SolarMaxModbusClient:
                 raise ModbusConnectionError("Not connected")
             try:
                 result = await self._client.read_holding_registers(
-                    address, count=count, slave=self._slave
+                    address, count, self._slave
                 )
             except ModbusException as err:
                 raise ModbusConnectionError(str(err)) from err
@@ -113,7 +113,7 @@ class SolarMaxModbusClient:
                     raise ModbusConnectionError("Not connected")
                 try:
                     result = await self._client.read_holding_registers(
-                        first_addr, count=count, slave=self._slave
+                        first_addr, count, self._slave
                     )
                 except ModbusException as err:
                     raise ModbusConnectionError(str(err)) from err
@@ -144,7 +144,7 @@ class SolarMaxModbusClient:
                 raise ModbusConnectionError("Not connected")
             try:
                 result = await self._client.write_register(
-                    address, value, slave=self._slave
+                    address, value, self._slave
                 )
             except ModbusException as err:
                 raise ModbusConnectionError(str(err)) from err
@@ -162,7 +162,7 @@ class SolarMaxModbusClient:
                 raise ModbusConnectionError("Not connected")
             try:
                 result = await self._client.write_registers(
-                    address, [high, low], slave=self._slave
+                    address, [high, low], self._slave
                 )
             except ModbusException as err:
                 raise ModbusConnectionError(str(err)) from err
