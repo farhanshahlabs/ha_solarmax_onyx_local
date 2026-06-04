@@ -29,7 +29,7 @@ async def async_setup_entry(
 def _device_info(entry: ConfigEntry) -> DeviceInfo:
     return DeviceInfo(
         identifiers={(DOMAIN, entry.entry_id)},
-        name=f"SolarMax Onyx ({entry.data['host']})",
+        name=entry.data.get("name", entry.title),
         manufacturer="SolarMax",
         model="Onyx Hybrid Inverter",
         configuration_url=f"http://{entry.data['host']}",
