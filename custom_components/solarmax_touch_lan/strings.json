@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SolarTouch LAN — Connect to your inverter",
+        "description": "Enter the local network details for your SolarMax Onyx inverter.\n\n{cloud_warning}",
+        "data": {
+          "host": "Inverter IP Address",
+          "port": "Modbus TCP Port",
+          "slave": "Modbus Slave ID",
+          "connection_mode": "Connection Mode",
+          "daily_cloud_sync": "Pause daily at 23:45 to allow cloud sync (6 min)"
+        },
+        "data_description": {
+          "host": "The local IP address of your inverter (e.g. 192.168.1.2)",
+          "port": "Default is 502",
+          "slave": "Default is 1",
+          "connection_mode": "Standby mode is recommended if you use the SolarTouch app",
+          "daily_cloud_sync": "Lets the inverter send one daily data point to cloudinverter.net at end of day"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the inverter. Check the IP address and that port 502 is reachable.",
+      "unknown": "Unexpected error. Check the Home Assistant logs."
+    },
+    "abort": {
+      "already_configured": "This inverter is already configured."
+    }
+  }
+}
