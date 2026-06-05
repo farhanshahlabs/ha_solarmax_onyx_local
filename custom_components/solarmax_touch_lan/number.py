@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -26,7 +25,6 @@ class SolarTouchNumber(NumberEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_mode = NumberMode.BOX
-    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
