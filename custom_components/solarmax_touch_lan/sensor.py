@@ -22,6 +22,7 @@ async def async_setup_entry(
     entities = [SolarTouchSensor(coordinator, entry, defn) for defn in SENSOR_DEFINITIONS]
     entities.append(ConnectionStatusSensor(coordinator, entry))
     entities.append(LiveSessionRemainingSensor(coordinator, entry))
+    entities.append(NextPollInSensor(coordinator, entry))
     entities.append(LastPollSensor(coordinator, entry))
     async_add_entities(entities)
 
@@ -125,6 +126,33 @@ class LiveSessionRemainingSensor(SensorEntity):
     @property
     def native_value(self) -> int:
         return self._coordinator.live_session_remaining
+
+
+class NextPollInSensor(SensorEntity):
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_name = "Next Poll In"
+    _attr_native_unit_of_measurement = "s"
+    _attr_icon = "mdi:timer-sand"
+
+    def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_next_poll_in"
+        self._attr_device_info = _device_info(entry)
+
+    async def async_added_to_hass(self) -> None:
+        self._coordinator.register_listener(self._handle_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._coordinator.unregister_listener(self._handle_update)
+
+    @callback
+    def _handle_update(self) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> int:
+        return self._coordinator.next_poll_in
 
 
 class LastPollSensor(SensorEntity):

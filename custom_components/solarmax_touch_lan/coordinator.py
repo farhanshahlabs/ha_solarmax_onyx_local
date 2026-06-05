@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any
@@ -35,6 +34,8 @@ STATUS_LIVE = "live"
 STATUS_CONNECTING = "connecting"
 STATUS_ERROR = "error"
 
+COUNTDOWN_TICK_SECONDS = 5  # how often the countdown sensors update
+
 
 class SolarTouchLANCoordinator:
     """Manages polling, connection lifecycle, and session timers."""
@@ -51,13 +52,22 @@ class SolarTouchLANCoordinator:
         self.data: dict[str, Any] = {}
         self.status: str = STATUS_STANDBY
         self.last_poll: datetime | None = None
+
+        # Countdown values — calculated from end timestamps every 5s
         self.live_session_remaining: int = 0
+        self.next_poll_in: int = 0
+
+        # Internal timestamps for countdown calculation
+        self._live_session_end_time: datetime | None = None
+        self._next_fast_poll_at: datetime | None = None
+        self._current_fast_interval: int = SCAN_FAST_SECONDS
 
         self._fast_defs = [d for d in SENSOR_DEFINITIONS if d["fast"]]
         self._slow_defs = [d for d in SENSOR_DEFINITIONS if not d["fast"]]
 
         self._fast_unsub = None
         self._slow_unsub = None
+        self._countdown_unsub = None
         self._live_timer_handle = None
         self._cloud_sync_unsub = None
         self._cloud_sync_active = False
@@ -112,10 +122,9 @@ class SolarTouchLANCoordinator:
             await self._async_connect()
             self._start_polling(live=True)
         else:
-            # Already live — restart polling at live speed in case mode changed
+            # Already live — restart at live speed and reset countdown
             self._stop_polling()
             self._start_polling(live=True)
-        # Always reset timer — pressing Go Live again extends to full 5 min
         self._reset_live_timer(LIVE_SESSION_SECONDS)
 
     async def async_pause_sync(self) -> None:
@@ -123,32 +132,36 @@ class SolarTouchLANCoordinator:
         if self._live_timer_handle:
             self._live_timer_handle()
             self._live_timer_handle = None
+        self._live_session_end_time = None
         self.live_session_remaining = 0
+        self.next_poll_in = 0
+        self._next_fast_poll_at = None
         self._stop_polling()
         await self.client.async_disconnect()
         self.status = STATUS_STANDBY
         self._notify_listeners()
 
     async def async_set_mode(self, mode: str) -> None:
-        """Switch between standby and always-on at runtime without reconfiguring."""
+        """Switch between standby and always-on at runtime."""
         if self._mode == mode:
             return
         self._mode = mode
         if mode == CONNECTION_MODE_ALWAYS_ON:
-            # Cancel any standby live timer
             if self._live_timer_handle:
                 self._live_timer_handle()
                 self._live_timer_handle = None
+            self._live_session_end_time = None
             self.live_session_remaining = 0
             await self._async_connect()
-            self._start_polling()
+            self._start_polling(live=False)
         else:
-            # Switch to standby: stop polling but keep last data
             self._stop_polling()
             if self._live_timer_handle:
                 self._live_timer_handle()
                 self._live_timer_handle = None
+            self._live_session_end_time = None
             self.live_session_remaining = 0
+            self.next_poll_in = 0
             await self.client.async_disconnect()
             self.status = STATUS_STANDBY
         self._notify_listeners()
@@ -165,7 +178,7 @@ class SolarTouchLANCoordinator:
         """Write a register and extend the live session."""
         if not self.client.connected:
             await self._async_connect()
-            self._start_polling()
+            self._start_polling(live=True)
         try:
             if uint32:
                 await self.client.async_write_register_uint32(address, value)
@@ -203,26 +216,54 @@ class SolarTouchLANCoordinator:
     def _start_polling(self, live: bool = False) -> None:
         if self._fast_unsub:
             return
-        fast_interval = SCAN_LIVE_FAST_SECONDS if live else SCAN_FAST_SECONDS
+        self._current_fast_interval = SCAN_LIVE_FAST_SECONDS if live else SCAN_FAST_SECONDS
         self._fast_unsub = async_track_time_interval(
-            self.hass, self._async_fast_poll, timedelta(seconds=fast_interval)
+            self.hass, self._async_fast_poll, timedelta(seconds=self._current_fast_interval)
         )
         self._slow_unsub = async_track_time_interval(
             self.hass, self._async_slow_poll, timedelta(seconds=SCAN_SLOW_SECONDS)
         )
+        # Countdown ticker — updates Live Session Remaining and Next Poll In every 5s
+        self._countdown_unsub = async_track_time_interval(
+            self.hass, self._async_tick_countdowns, timedelta(seconds=COUNTDOWN_TICK_SECONDS)
+        )
+        # Set first "next poll" expectation
+        self._next_fast_poll_at = dt_util.utcnow() + timedelta(seconds=self._current_fast_interval)
         self.hass.async_create_task(self._async_poll_all())
 
     def _stop_polling(self) -> None:
-        if self._fast_unsub:
-            self._fast_unsub()
-            self._fast_unsub = None
-        if self._slow_unsub:
-            self._slow_unsub()
-            self._slow_unsub = None
+        for attr in ("_fast_unsub", "_slow_unsub", "_countdown_unsub"):
+            unsub = getattr(self, attr)
+            if unsub:
+                unsub()
+                setattr(self, attr, None)
+        self._next_fast_poll_at = None
+        self.next_poll_in = 0
+
+    @callback
+    def _async_tick_countdowns(self, _now=None) -> None:
+        """Called every 5s to update Live Session Remaining and Next Poll In."""
+        now = dt_util.utcnow()
+
+        if self._live_session_end_time:
+            remaining = (self._live_session_end_time - now).total_seconds()
+            self.live_session_remaining = max(0, int(remaining))
+        else:
+            self.live_session_remaining = 0
+
+        if self._next_fast_poll_at:
+            until_poll = (self._next_fast_poll_at - now).total_seconds()
+            self.next_poll_in = max(0, int(until_poll))
+        else:
+            self.next_poll_in = 0
+
+        self._notify_listeners()
 
     async def _async_fast_poll(self, _now=None) -> None:
         if not self.client.connected:
             return
+        # Update next poll expectation immediately
+        self._next_fast_poll_at = dt_util.utcnow() + timedelta(seconds=self._current_fast_interval)
         try:
             new_data = await self.client.async_read_registers_batch(self._fast_defs)
             self.data.update(new_data)
@@ -247,6 +288,7 @@ class SolarTouchLANCoordinator:
     async def _async_poll_all(self) -> None:
         if not self.client.connected:
             return
+        self._next_fast_poll_at = dt_util.utcnow() + timedelta(seconds=self._current_fast_interval)
         try:
             fast = await self.client.async_read_registers_batch(self._fast_defs)
             slow = await self.client.async_read_registers_batch(self._slow_defs)
@@ -263,8 +305,9 @@ class SolarTouchLANCoordinator:
     def _reset_live_timer(self, seconds: int) -> None:
         if self._live_timer_handle:
             self._live_timer_handle()
-        self.live_session_remaining = seconds
         fire_at = dt_util.utcnow() + timedelta(seconds=seconds)
+        self._live_session_end_time = fire_at
+        self.live_session_remaining = seconds
         self._live_timer_handle = async_track_point_in_time(
             self.hass, self._async_live_session_expired, fire_at
         )
@@ -272,7 +315,9 @@ class SolarTouchLANCoordinator:
 
     async def _async_live_session_expired(self, _now=None) -> None:
         self._live_timer_handle = None
+        self._live_session_end_time = None
         self.live_session_remaining = 0
+        self.next_poll_in = 0
         self._stop_polling()
         await self.client.async_disconnect()
         self.status = STATUS_STANDBY
