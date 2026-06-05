@@ -24,7 +24,7 @@ async def async_setup_entry(
 
 class RefreshButton(ButtonEntity):
     _attr_has_entity_name = True
-    _attr_name = "Refresh Now"
+    _attr_name = "Fetch Data Now"
     _attr_icon = "mdi:refresh"
 
     def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:
