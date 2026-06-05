@@ -16,9 +16,12 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: SolarTouchLANCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities: list[ButtonEntity] = [RefreshButton(coordinator, entry)]
+    entities: list[ButtonEntity] = [
+        RefreshButton(coordinator, entry),
+        PauseSyncButton(coordinator, entry),
+    ]
     if entry.data.get(CONF_CONNECTION_MODE) == CONNECTION_MODE_STANDBY:
-        entities.append(GoLiveButton(coordinator, entry))
+        entities.insert(1, GoLiveButton(coordinator, entry))
     async_add_entities(entities)
 
 
@@ -38,7 +41,7 @@ class RefreshButton(ButtonEntity):
 
 class GoLiveButton(ButtonEntity):
     _attr_has_entity_name = True
-    _attr_name = "2 Go Live"
+    _attr_name = "2 Go Live 5 Min"
     _attr_icon = "mdi:lan-pending"
 
     def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:
@@ -48,3 +51,17 @@ class GoLiveButton(ButtonEntity):
 
     async def async_press(self) -> None:
         await self._coordinator.async_go_live()
+
+
+class PauseSyncButton(ButtonEntity):
+    _attr_has_entity_name = True
+    _attr_name = "4 Pause Sync"
+    _attr_icon = "mdi:pause-circle-outline"
+
+    def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_pause_sync"
+        self._attr_device_info = _device_info(entry)
+
+    async def async_press(self) -> None:
+        await self._coordinator.async_pause_sync()

@@ -61,7 +61,6 @@ class SolarTouchLANCoordinator:
         self._cloud_sync_unsub = None
         self._cloud_sync_active = False
         self._cloud_sync_resume_handle = None
-        self._slow_tick = 0
 
         self._listeners: list[Any] = []
 
@@ -72,8 +71,6 @@ class SolarTouchLANCoordinator:
             await self._async_connect()
             self._start_polling()
         else:
-            # Schedule initial fetch as a background task so it runs AFTER
-            # all entities are registered and listeners are attached.
             self.hass.async_create_task(self._async_initial_fetch())
 
         if self._daily_sync:
@@ -105,14 +102,51 @@ class SolarTouchLANCoordinator:
         await self.client.async_disconnect()
 
     async def async_go_live(self) -> None:
-        """Activate a live session (standby mode only)."""
-        if self._mode != CONNECTION_MODE_STANDBY:
-            return
+        """Activate or extend a live session. Always resets the 5-min timer."""
         if self._cloud_sync_active:
             return
-        await self._async_connect()
-        self._start_polling()
+        if self._mode == CONNECTION_MODE_ALWAYS_ON:
+            return
+        if not self.client.connected:
+            await self._async_connect()
+            self._start_polling()
+        # Always reset timer — pressing Go Live again extends to full 5 min
         self._reset_live_timer(LIVE_SESSION_SECONDS)
+
+    async def async_pause_sync(self) -> None:
+        """Stop any active sync/polling immediately and return to standby."""
+        if self._live_timer_handle:
+            self._live_timer_handle()
+            self._live_timer_handle = None
+        self.live_session_remaining = 0
+        self._stop_polling()
+        await self.client.async_disconnect()
+        self.status = STATUS_STANDBY
+        self._notify_listeners()
+
+    async def async_set_mode(self, mode: str) -> None:
+        """Switch between standby and always-on at runtime without reconfiguring."""
+        if self._mode == mode:
+            return
+        self._mode = mode
+        if mode == CONNECTION_MODE_ALWAYS_ON:
+            # Cancel any standby live timer
+            if self._live_timer_handle:
+                self._live_timer_handle()
+                self._live_timer_handle = None
+            self.live_session_remaining = 0
+            await self._async_connect()
+            self._start_polling()
+        else:
+            # Switch to standby: stop polling but keep last data
+            self._stop_polling()
+            if self._live_timer_handle:
+                self._live_timer_handle()
+                self._live_timer_handle = None
+            self.live_session_remaining = 0
+            await self.client.async_disconnect()
+            self.status = STATUS_STANDBY
+        self._notify_listeners()
 
     async def async_force_refresh(self) -> None:
         """Immediately poll all sensors regardless of mode/timer."""
@@ -145,7 +179,6 @@ class SolarTouchLANCoordinator:
         self._listeners.append(callback_fn)
 
     def unregister_listener(self, callback_fn) -> None:
-        self._listeners.discard(callback_fn) if hasattr(self._listeners, "discard") else None
         if callback_fn in self._listeners:
             self._listeners.remove(callback_fn)
 
@@ -171,7 +204,6 @@ class SolarTouchLANCoordinator:
         self._slow_unsub = async_track_time_interval(
             self.hass, self._async_slow_poll, timedelta(seconds=SCAN_SLOW_SECONDS)
         )
-        # Kick off an immediate poll
         self.hass.async_create_task(self._async_poll_all())
 
     def _stop_polling(self) -> None:
@@ -257,13 +289,11 @@ class SolarTouchLANCoordinator:
         _LOGGER.info("Daily cloud sync: pausing local connection for %s seconds", CLOUD_SYNC_PAUSE_SECONDS)
         self._cloud_sync_active = True
         self._cloud_sync_unsub = None
-
         if self.client.connected:
             self._stop_polling()
             await self.client.async_disconnect()
             self.status = STATUS_STANDBY
             self._notify_listeners()
-
         resume_at = dt_util.utcnow() + timedelta(seconds=CLOUD_SYNC_PAUSE_SECONDS)
         self._cloud_sync_resume_handle = async_track_point_in_time(
             self.hass, self._async_cloud_sync_end, resume_at
@@ -274,7 +304,6 @@ class SolarTouchLANCoordinator:
         self._cloud_sync_active = False
         self._cloud_sync_resume_handle = None
         self._schedule_next_cloud_sync()
-
         if self._mode == CONNECTION_MODE_ALWAYS_ON:
             await self._async_connect()
             self._start_polling()

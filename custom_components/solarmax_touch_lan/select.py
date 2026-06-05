@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from homeassistant.components.select import SelectEntity
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -24,7 +25,8 @@ async def async_setup_entry(
 class InverterOperationModeSelect(SelectEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
-    _attr_name = "3 Inverter Operation Mode"
+    _attr_name = "Inverter Operation Mode"
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:solar-power-variant"
     _attr_options = list(OPERATION_MODE_OPTIONS.keys())
 
