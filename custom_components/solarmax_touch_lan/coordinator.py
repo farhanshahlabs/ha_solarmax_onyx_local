@@ -72,19 +72,26 @@ class SolarTouchLANCoordinator:
             await self._async_connect()
             self._start_polling()
         else:
-            # Standby mode: do one-shot fetch to populate initial values, then disconnect
-            self.status = STATUS_CONNECTING
-            try:
-                await self.client.async_connect()
-                await self._async_poll_all()
-            except Exception:  # noqa: BLE001
-                pass
-            finally:
-                await self.client.async_disconnect()
-                self.status = STATUS_STANDBY
+            # Schedule initial fetch as a background task so it runs AFTER
+            # all entities are registered and listeners are attached.
+            self.hass.async_create_task(self._async_initial_fetch())
 
         if self._daily_sync:
             self._schedule_next_cloud_sync()
+
+    async def _async_initial_fetch(self) -> None:
+        """One-shot connect → poll → disconnect to populate values on startup."""
+        self.status = STATUS_CONNECTING
+        self._notify_listeners()
+        try:
+            await self.client.async_connect()
+            await self._async_poll_all()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Initial fetch failed: %s", err)
+        finally:
+            await self.client.async_disconnect()
+            self.status = STATUS_STANDBY
+            self._notify_listeners()
 
     async def async_shutdown(self) -> None:
         self._stop_polling()
