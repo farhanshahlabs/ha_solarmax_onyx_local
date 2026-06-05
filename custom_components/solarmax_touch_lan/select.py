@@ -24,7 +24,7 @@ async def async_setup_entry(
 class InverterOperationModeSelect(SelectEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
-    _attr_name = "Inverter Operation Mode"
+    _attr_name = "3 Inverter Operation Mode"
     _attr_icon = "mdi:solar-power-variant"
     _attr_options = list(OPERATION_MODE_OPTIONS.keys())
 
