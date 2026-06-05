@@ -27,7 +27,7 @@ async def async_setup_entry(
 
 class RefreshButton(ButtonEntity):
     _attr_has_entity_name = True
-    _attr_name = "1 Refresh"
+    _attr_name = "Refresh Now"
     _attr_icon = "mdi:refresh"
 
     def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:
@@ -41,7 +41,7 @@ class RefreshButton(ButtonEntity):
 
 class GoLiveButton(ButtonEntity):
     _attr_has_entity_name = True
-    _attr_name = "2 Go Live 5 Min"
+    _attr_name = "Go Live 5 Min"
     _attr_icon = "mdi:lan-pending"
 
     def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:
@@ -55,7 +55,7 @@ class GoLiveButton(ButtonEntity):
 
 class PauseSyncButton(ButtonEntity):
     _attr_has_entity_name = True
-    _attr_name = "4 Pause Sync"
+    _attr_name = "Pause Sync"
     _attr_icon = "mdi:pause-circle-outline"
 
     def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:

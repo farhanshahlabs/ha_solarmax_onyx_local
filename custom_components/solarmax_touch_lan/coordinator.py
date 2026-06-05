@@ -22,6 +22,7 @@ from .const import (
     CLOUD_SYNC_HOUR,
     CLOUD_SYNC_MINUTE,
     SCAN_FAST_SECONDS,
+    SCAN_LIVE_FAST_SECONDS,
     SCAN_SLOW_SECONDS,
     SENSOR_DEFINITIONS,
 )
@@ -109,7 +110,11 @@ class SolarTouchLANCoordinator:
             return
         if not self.client.connected:
             await self._async_connect()
-            self._start_polling()
+            self._start_polling(live=True)
+        else:
+            # Already live — restart polling at live speed in case mode changed
+            self._stop_polling()
+            self._start_polling(live=True)
         # Always reset timer — pressing Go Live again extends to full 5 min
         self._reset_live_timer(LIVE_SESSION_SECONDS)
 
@@ -195,11 +200,12 @@ class SolarTouchLANCoordinator:
             self.status = STATUS_ERROR
         self._notify_listeners()
 
-    def _start_polling(self) -> None:
+    def _start_polling(self, live: bool = False) -> None:
         if self._fast_unsub:
             return
+        fast_interval = SCAN_LIVE_FAST_SECONDS if live else SCAN_FAST_SECONDS
         self._fast_unsub = async_track_time_interval(
-            self.hass, self._async_fast_poll, timedelta(seconds=SCAN_FAST_SECONDS)
+            self.hass, self._async_fast_poll, timedelta(seconds=fast_interval)
         )
         self._slow_unsub = async_track_time_interval(
             self.hass, self._async_slow_poll, timedelta(seconds=SCAN_SLOW_SECONDS)
