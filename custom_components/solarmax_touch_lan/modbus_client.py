@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
-import struct
 from typing import Any
 
 from pymodbus.client import AsyncModbusTcpClient
@@ -17,6 +17,15 @@ class ModbusConnectionError(Exception):
     """Raised when the Modbus TCP connection fails."""
 
 
+def _supports_slave_kwarg(client: AsyncModbusTcpClient) -> bool:
+    """Return True if this pymodbus version accepts 'slave' as a keyword arg."""
+    try:
+        sig = inspect.signature(client.read_holding_registers)
+        return "slave" in sig.parameters
+    except (ValueError, TypeError):
+        return False
+
+
 class SolarMaxModbusClient:
     """Thin async wrapper around pymodbus AsyncModbusTcpClient."""
 
@@ -26,6 +35,7 @@ class SolarMaxModbusClient:
         self._slave = slave
         self._client: AsyncModbusTcpClient | None = None
         self._lock = asyncio.Lock()
+        self._slave_kwarg: bool | None = None  # detected on first connect
 
     async def async_connect(self) -> None:
         async with self._lock:
@@ -38,6 +48,9 @@ class SolarMaxModbusClient:
                 raise ModbusConnectionError(
                     f"Cannot connect to {self._host}:{self._port}"
                 )
+            # Detect once which calling convention this pymodbus version uses
+            self._slave_kwarg = _supports_slave_kwarg(self._client)
+            _LOGGER.debug("pymodbus slave kwarg supported: %s", self._slave_kwarg)
 
     async def async_disconnect(self) -> None:
         async with self._lock:
@@ -49,22 +62,35 @@ class SolarMaxModbusClient:
     def connected(self) -> bool:
         return self._client is not None and self._client.connected
 
+    async def _read_registers(self, address: int, count: int):
+        """Call read_holding_registers with the right signature for this pymodbus version."""
+        if self._slave_kwarg:
+            return await self._client.read_holding_registers(
+                address, count=count, slave=self._slave
+            )
+        # Newer pymodbus: slave not accepted, only address + count
+        return await self._client.read_holding_registers(address, count=count)
+
+    async def _write_register(self, address: int, value: int):
+        if self._slave_kwarg:
+            return await self._client.write_register(address, value, slave=self._slave)
+        return await self._client.write_register(address, value)
+
+    async def _write_registers(self, address: int, values: list[int]):
+        if self._slave_kwarg:
+            return await self._client.write_registers(address, values, slave=self._slave)
+        return await self._client.write_registers(address, values)
+
     async def async_read_register(
         self, address: int, data_type: str, swap: bool = False
     ) -> float | int:
-        """Read one value from holding registers.
-
-        data_type: uint16 | int16 | uint32 | int32
-        swap: swap the two 16-bit words of a 32-bit register
-        """
+        """Read one value from holding registers."""
         count = 2 if data_type in ("uint32", "int32") else 1
         async with self._lock:
             if not self.connected:
                 raise ModbusConnectionError("Not connected")
             try:
-                result = await self._client.read_holding_registers(
-                    address, count, self._slave
-                )
+                result = await self._read_registers(address, count)
             except ModbusException as err:
                 raise ModbusConnectionError(str(err)) from err
 
@@ -72,19 +98,15 @@ class SolarMaxModbusClient:
             raise ModbusConnectionError(
                 f"Modbus error reading register {address}: {result}"
             )
-
-        regs = result.registers
-        return _decode(regs, data_type, swap)
+        return _decode(result.registers, data_type, swap)
 
     async def async_read_registers_batch(
         self, definitions: list[dict]
     ) -> dict[str, Any]:
         """Read multiple registers grouped into contiguous batches for efficiency."""
         results: dict[str, Any] = {}
-        # Sort by address so we can batch nearby registers
         sorted_defs = sorted(definitions, key=lambda d: d["register"])
 
-        # Build batches: registers within 10 addresses of each other share one read
         batches: list[list[dict]] = []
         current: list[dict] = []
         for defn in sorted_defs:
@@ -112,9 +134,7 @@ class SolarMaxModbusClient:
                 if not self.connected:
                     raise ModbusConnectionError("Not connected")
                 try:
-                    result = await self._client.read_holding_registers(
-                        first_addr, count, self._slave
-                    )
+                    result = await self._read_registers(first_addr, count)
                 except ModbusException as err:
                     raise ModbusConnectionError(str(err)) from err
 
@@ -143,9 +163,7 @@ class SolarMaxModbusClient:
             if not self.connected:
                 raise ModbusConnectionError("Not connected")
             try:
-                result = await self._client.write_register(
-                    address, value, self._slave
-                )
+                result = await self._write_register(address, value)
             except ModbusException as err:
                 raise ModbusConnectionError(str(err)) from err
         if result.isError():
@@ -161,9 +179,7 @@ class SolarMaxModbusClient:
             if not self.connected:
                 raise ModbusConnectionError("Not connected")
             try:
-                result = await self._client.write_registers(
-                    address, [high, low], self._slave
-                )
+                result = await self._write_registers(address, [high, low])
             except ModbusException as err:
                 raise ModbusConnectionError(str(err)) from err
         if result.isError():
