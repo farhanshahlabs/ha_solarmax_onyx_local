@@ -12,7 +12,8 @@ from .const import (
     DOMAIN,
     OPERATION_MODE_OPTIONS,
     OPERATION_MODE_REGISTER,
-    CONNECTION_MODE_ALWAYS_ON,
+    CONNECTION_MODE_LIVE,
+    CONNECTION_MODE_PERIODIC,
     CONNECTION_MODE_STANDBY,
 )
 from .coordinator import SolarTouchLANCoordinator
@@ -20,8 +21,9 @@ from .sensor import _device_info
 
 _MODE_BY_VALUE = {v: k for k, v in OPERATION_MODE_OPTIONS.items()}
 
-SYNC_MODE_STANDBY = "Standby Mode"
-SYNC_MODE_CONTINUOUS = "Continuous Sync Mode"
+SYNC_MODE_STANDBY = "Standby"
+SYNC_MODE_PERIODIC = "Periodic"
+SYNC_MODE_LIVE = "Live"
 
 
 async def async_setup_entry(
@@ -35,13 +37,13 @@ async def async_setup_entry(
 
 
 class SyncModeSelect(SelectEntity):
-    """Dropdown to switch between Standby Mode and Continuous Sync Mode."""
+    """Dropdown to switch between Standby, Periodic, and Live modes."""
 
     _attr_has_entity_name = True
     _attr_should_poll = False
-    _attr_name = "Sync Mode"
+    _attr_name = "4. Sync Mode"
     _attr_icon = "mdi:sync"
-    _attr_options = [SYNC_MODE_STANDBY, SYNC_MODE_CONTINUOUS]
+    _attr_options = [SYNC_MODE_STANDBY, SYNC_MODE_PERIODIC, SYNC_MODE_LIVE]
 
     def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
@@ -60,13 +62,17 @@ class SyncModeSelect(SelectEntity):
 
     @property
     def current_option(self) -> str:
-        if self._coordinator._mode == CONNECTION_MODE_ALWAYS_ON:
-            return SYNC_MODE_CONTINUOUS
+        if self._coordinator._mode == CONNECTION_MODE_LIVE:
+            return SYNC_MODE_LIVE
+        if self._coordinator._mode == CONNECTION_MODE_PERIODIC:
+            return SYNC_MODE_PERIODIC
         return SYNC_MODE_STANDBY
 
     async def async_select_option(self, option: str) -> None:
-        if option == SYNC_MODE_CONTINUOUS:
-            await self._coordinator.async_set_mode(CONNECTION_MODE_ALWAYS_ON)
+        if option == SYNC_MODE_LIVE:
+            await self._coordinator.async_set_mode(CONNECTION_MODE_LIVE)
+        elif option == SYNC_MODE_PERIODIC:
+            await self._coordinator.async_set_mode(CONNECTION_MODE_PERIODIC)
         else:
             await self._coordinator.async_set_mode(CONNECTION_MODE_STANDBY)
 
@@ -74,7 +80,7 @@ class SyncModeSelect(SelectEntity):
 class InverterOperationModeSelect(SelectEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
-    _attr_name = "Inverter Operation Mode"
+    _attr_name = "01. Inverter Operation Mode"
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:solar-power-variant"
     _attr_options = list(OPERATION_MODE_OPTIONS.keys())

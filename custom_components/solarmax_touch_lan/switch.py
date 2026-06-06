@@ -22,7 +22,7 @@ async def async_setup_entry(
 class ConnectionModeSwitch(SwitchEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
-    _attr_name = "3 Always On Mode"
+    _attr_name = "6. Live Mode"
     _attr_icon = "mdi:refresh-auto"
 
     def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:

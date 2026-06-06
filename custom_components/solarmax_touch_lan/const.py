@@ -7,9 +7,14 @@ CONF_PORT = "port"
 CONF_SLAVE = "slave"
 CONF_CONNECTION_MODE = "connection_mode"
 CONF_DAILY_CLOUD_SYNC = "daily_cloud_sync"
+CONF_PERIODIC_INTERVAL = "periodic_interval"
 
-CONNECTION_MODE_ALWAYS_ON = "always_on"
 CONNECTION_MODE_STANDBY = "standby"
+CONNECTION_MODE_PERIODIC = "periodic"
+CONNECTION_MODE_LIVE = "live"
+CONNECTION_MODE_ALWAYS_ON = CONNECTION_MODE_LIVE  # legacy alias
+
+PERIODIC_INTERVAL_DEFAULT = 5  # minutes
 
 LIVE_SESSION_SECONDS = 300       # 5 minutes
 WRITE_LINGER_SECONDS = 60        # 1 minute after a write
@@ -17,9 +22,9 @@ CLOUD_SYNC_PAUSE_SECONDS = 360   # 6 minutes at 23:45
 CLOUD_SYNC_HOUR = 23
 CLOUD_SYNC_MINUTE = 45
 
-SCAN_FAST_SECONDS = 30        # always-on mode
-SCAN_LIVE_FAST_SECONDS = 10   # during a Go Live session
-SCAN_SLOW_SECONDS = 300
+SCAN_FAST_SECONDS = 10        # live mode poll interval
+SCAN_LIVE_FAST_SECONDS = 5    # during a Go Live session
+SCAN_SLOW_SECONDS = 60
 
 SLAVE_DEFAULT = 1
 PORT_DEFAULT = 502
@@ -36,7 +41,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 SENSOR_DEFINITIONS = [
     # ── FAST sensors (30 s) ───────────────────────────────────────────────────
     {
-        "name": "Live PV Total Power",
+        "name": "11. Live PV Total Power",
         "key": "live_pv_total_power",
         "register": 4168,
         "data_type": "uint32",
@@ -48,7 +53,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "PV1 Voltage",
+        "name": "12. PV1 Voltage",
         "key": "pv1_voltage",
         "register": 4112,
         "data_type": "uint16",
@@ -60,7 +65,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "PV1 Current",
+        "name": "13. PV1 Current",
         "key": "pv1_current",
         "register": 4113,
         "data_type": "uint16",
@@ -72,7 +77,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "PV1 Power",
+        "name": "14. PV1 Power",
         "key": "pv1_power",
         "register": 4114,
         "data_type": "uint32",
@@ -84,7 +89,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "PV2 Voltage",
+        "name": "15. PV2 Voltage",
         "key": "pv2_voltage",
         "register": 4116,
         "data_type": "uint16",
@@ -96,7 +101,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "PV2 Current",
+        "name": "16. PV2 Current",
         "key": "pv2_current",
         "register": 4117,
         "data_type": "uint16",
@@ -108,7 +113,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "PV2 Power",
+        "name": "17. PV2 Power",
         "key": "pv2_power",
         "register": 4119,
         "data_type": "uint32",
@@ -120,7 +125,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "Battery Power",
+        "name": "18. Battery Power",
         "key": "battery_power",
         "register": 8201,
         "data_type": "int32",
@@ -132,7 +137,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "Battery State of Charge",
+        "name": "19. Battery State of Charge",
         "key": "battery_soc",
         "register": 8192,
         "data_type": "uint16",
@@ -144,7 +149,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "Load Power",
+        "name": "35. Load Power",
         "key": "load_power",
         "register": 4875,
         "data_type": "int32",
@@ -156,7 +161,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "Grid Power",
+        "name": "27. Grid Power",
         "key": "grid_power",
         "register": 4865,
         "data_type": "int32",
@@ -168,7 +173,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "Inverter CT Clamp Power",
+        "name": "29. Inverter CT Clamp Power",
         "key": "inverter_ct_clamp_power",
         "register": 4864,
         "data_type": "int32",
@@ -180,7 +185,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "Light Load Power",
+        "name": "38. Light Load Power",
         "key": "light_load_power",
         "register": 4947,
         "data_type": "int32",
@@ -193,7 +198,7 @@ SENSOR_DEFINITIONS = [
     },
     # ── SLOW sensors (5 min) ──────────────────────────────────────────────────
     {
-        "name": "Battery Temperature",
+        "name": "22. Battery Temperature",
         "key": "battery_temperature",
         "register": 8220,
         "data_type": "int16",
@@ -205,7 +210,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Battery Voltage",
+        "name": "20. Battery Voltage",
         "key": "battery_voltage",
         "register": 8198,
         "data_type": "uint16",
@@ -217,7 +222,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Battery Current",
+        "name": "21. Battery Current",
         "key": "battery_current",
         "register": 8200,
         "data_type": "int32",
@@ -229,7 +234,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Today Battery Energy Charge",
+        "name": "23. Today Battery Energy Charge",
         "key": "battery_charge_energy_today",
         "register": 8203,
         "data_type": "uint32",
@@ -241,7 +246,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Battery Charge Lifetime Energy",
+        "name": "24. Battery Charge Lifetime Energy",
         "key": "battery_charge_lifetime_energy",
         "register": 8205,
         "data_type": "uint32",
@@ -253,7 +258,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Battery Discharge Energy Today",
+        "name": "25. Battery Discharge Energy Today",
         "key": "battery_discharge_energy_today",
         "register": 8207,
         "data_type": "uint32",
@@ -265,7 +270,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Battery Discharge Lifetime Energy",
+        "name": "26. Battery Discharge Lifetime Energy",
         "key": "battery_discharge_lifetime_energy",
         "register": 8209,
         "data_type": "uint32",
@@ -277,7 +282,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Discharge End SOC (on battery)",
+        "name": "08. Discharge End SOC (on battery)",
         "key": "discharge_end_soc_on_battery",
         "register": 8475,
         "data_type": "uint16",
@@ -289,7 +294,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Discharge End SOC (on grid)",
+        "name": "07. Discharge End SOC (on grid)",
         "key": "discharge_end_soc_on_grid",
         "register": 8522,
         "data_type": "uint16",
@@ -313,7 +318,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Maximum Grid Charging Power",
+        "name": "05. Max Grid Charging Power",
         "key": "maximum_grid_charging_power",
         "register": 8470,
         "data_type": "uint16",
@@ -325,7 +330,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Maximum Grid Export Power",
+        "name": "02. Max Grid Export Power",
         "key": "max_grid_export_power",
         "register": 12473,
         "data_type": "uint32",
@@ -337,7 +342,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Stop Grid Charging Battery SOC",
+        "name": "06. Stop Grid Charging Battery SOC",
         "key": "stop_grid_charging_battery_soc",
         "register": 8471,
         "data_type": "uint16",
@@ -349,7 +354,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Battery Charging Max Power",
+        "name": "03. Battery Charging Max Power",
         "key": "battery_charging_max_power",
         "register": 8472,
         "data_type": "uint16",
@@ -361,7 +366,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Battery Stop Charging Maximum SOC",
+        "name": "04. Battery Stop Charging Maximum SOC",
         "key": "battery_stop_charging_maximum_soc",
         "register": 8473,
         "data_type": "uint16",
@@ -373,7 +378,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Grid Frequency",
+        "name": "30. Grid Frequency",
         "key": "grid_frequency",
         "register": 4920,
         "data_type": "uint16",
@@ -385,7 +390,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Smart Load Power",
+        "name": "46. Smart Load Power",
         "key": "smart_load_power",
         "register": 4974,
         "data_type": "int16",
@@ -397,7 +402,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Smart Load Turn ON Battery SOC",
+        "name": "09. Smart Load Turn ON Battery SOC",
         "key": "smart_load_turn_on_battery_soc",
         "register": 8492,
         "data_type": "uint16",
@@ -409,7 +414,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Smart Load Turn OFF Battery SOC",
+        "name": "10. Smart Load Turn OFF Battery SOC",
         "key": "smart_load_turn_off_battery_soc",
         "register": 8493,
         "data_type": "uint16",
@@ -421,7 +426,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Inverter Internal Temperature",
+        "name": "44. Inverter Internal Temperature",
         "key": "inverter_internal_temperature",
         "register": 4124,
         "data_type": "int16",
@@ -433,7 +438,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Energy Produced Today",
+        "name": "40. Energy Produced Today",
         "key": "energy_produced_today",
         "register": 4135,
         "data_type": "uint32",
@@ -445,7 +450,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Energy Produced Lifetime",
+        "name": "41. Energy Produced Lifetime",
         "key": "energy_produced_lifetime",
         "register": 4130,
         "data_type": "uint32",
@@ -457,7 +462,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Inverter Operating Hours",
+        "name": "45. Inverter Operating Hours",
         "key": "inverter_operating_hours",
         "register": 4132,
         "data_type": "uint32",
@@ -469,7 +474,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Peak Production Power Today",
+        "name": "42. Peak Production Power Today",
         "key": "peak_production_power_today",
         "register": 4155,
         "data_type": "int32",
@@ -481,7 +486,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Energy Import Lifetime",
+        "name": "32. Energy Import Lifetime",
         "key": "energy_import_lifetime",
         "register": 4870,
         "data_type": "uint32",
@@ -493,7 +498,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Energy Import Today",
+        "name": "31. Energy Import Today",
         "key": "energy_import_today",
         "register": 4915,
         "data_type": "uint32",
@@ -505,7 +510,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Energy Export Lifetime",
+        "name": "34. Energy Export Lifetime",
         "key": "energy_export_lifetime",
         "register": 4872,
         "data_type": "uint32",
@@ -517,7 +522,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Energy Export Today",
+        "name": "33. Energy Export Today",
         "key": "energy_export_today",
         "register": 4917,
         "data_type": "uint32",
@@ -529,7 +534,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Load Voltage",
+        "name": "36. Load Voltage",
         "key": "load_voltage",
         "register": 4900,
         "data_type": "uint16",
@@ -541,7 +546,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Load Current",
+        "name": "37. Load Current",
         "key": "load_current",
         "register": 4904,
         "data_type": "int32",
@@ -553,7 +558,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Light Load Lifetime Energy",
+        "name": "39. Light Load Lifetime Energy",
         "key": "light_load_lifetime_energy",
         "register": 4962,
         "data_type": "int32",
@@ -565,7 +570,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Grid Export Power",
+        "name": "28. Grid Export Power",
         "key": "grid_export_power",
         "register": 4099,
         "data_type": "int32",
@@ -577,7 +582,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Inverter Solar Conversion Power",
+        "name": "43. Inverter Solar Conversion Power",
         "key": "inverter_solar_conversion_power",
         "register": 4151,
         "data_type": "int32",
@@ -589,7 +594,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "Inverter Operation Mode Raw",
+        "name": "01. Inverter Operation Mode",
         "key": "inverter_operation_mode_raw",
         "register": 8448,
         "data_type": "uint16",
@@ -607,7 +612,7 @@ SENSOR_DEFINITIONS = [
 NUMBER_DEFINITIONS = [
     {
         "key": "battery_charging_max_power",        # matches sensor key
-        "name": "Max Battery Charging Power",
+        "name": "03. Battery Charging Max Power",
         "register": 8472,
         "data_type": "uint16",
         "min": 100,
@@ -617,7 +622,7 @@ NUMBER_DEFINITIONS = [
     },
     {
         "key": "maximum_grid_charging_power",        # matches sensor key
-        "name": "Max Grid Charging Power",
+        "name": "05. Max Grid Charging Power",
         "register": 8470,
         "data_type": "uint16",
         "min": 100,
@@ -627,7 +632,7 @@ NUMBER_DEFINITIONS = [
     },
     {
         "key": "stop_grid_charging_battery_soc",     # matches sensor key
-        "name": "Stop Grid Charging Battery SOC",
+        "name": "06. Stop Grid Charging Battery SOC",
         "register": 8471,
         "data_type": "uint16",
         "min": 10,
@@ -637,7 +642,7 @@ NUMBER_DEFINITIONS = [
     },
     {
         "key": "battery_stop_charging_maximum_soc",  # matches sensor key
-        "name": "Max Solar Charging Stop SOC",
+        "name": "04. Battery Stop Charging Maximum SOC",
         "register": 8473,
         "data_type": "uint16",
         "min": 80,
@@ -647,7 +652,7 @@ NUMBER_DEFINITIONS = [
     },
     {
         "key": "discharge_end_soc_on_grid",          # matches sensor key
-        "name": "On Grid Discharging Stop SOC",
+        "name": "07. Discharge End SOC (on grid)",
         "register": 8522,
         "data_type": "uint16",
         "min": 10,
@@ -657,7 +662,7 @@ NUMBER_DEFINITIONS = [
     },
     {
         "key": "discharge_end_soc_on_battery",       # matches sensor key
-        "name": "Battery Discharge End SOC",
+        "name": "08. Discharge End SOC (on battery)",
         "register": 8475,
         "data_type": "uint16",
         "min": 5,
@@ -667,7 +672,7 @@ NUMBER_DEFINITIONS = [
     },
     {
         "key": "max_grid_export_power",              # matches sensor key
-        "name": "Max Grid Export Power",
+        "name": "02. Max Grid Export Power",
         "register": 12473,
         "data_type": "uint32",
         "min": 100,
@@ -677,7 +682,7 @@ NUMBER_DEFINITIONS = [
     },
     {
         "key": "smart_load_turn_on_battery_soc",     # matches sensor key
-        "name": "Smart Load Turn ON Battery SOC",
+        "name": "09. Smart Load Turn ON Battery SOC",
         "register": 8492,
         "data_type": "uint16",
         "min": 25,
@@ -687,7 +692,7 @@ NUMBER_DEFINITIONS = [
     },
     {
         "key": "smart_load_turn_off_battery_soc",    # matches sensor key
-        "name": "Smart Load Turn OFF Battery SOC",
+        "name": "10. Smart Load Turn OFF Battery SOC",
         "register": 8493,
         "data_type": "uint16",
         "min": 15,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any
@@ -12,9 +13,12 @@ import homeassistant.util.dt as dt_util
 
 from .const import (
     CONF_CONNECTION_MODE,
+    CONF_PERIODIC_INTERVAL,
     CONF_DAILY_CLOUD_SYNC,
-    CONNECTION_MODE_ALWAYS_ON,
+    CONNECTION_MODE_LIVE,
     CONNECTION_MODE_STANDBY,
+    CONNECTION_MODE_PERIODIC,
+    PERIODIC_INTERVAL_DEFAULT,
     LIVE_SESSION_SECONDS,
     WRITE_LINGER_SECONDS,
     CLOUD_SYNC_PAUSE_SECONDS,
@@ -22,7 +26,6 @@ from .const import (
     CLOUD_SYNC_MINUTE,
     SCAN_FAST_SECONDS,
     SCAN_LIVE_FAST_SECONDS,
-    SCAN_SLOW_SECONDS,
     SENSOR_DEFINITIONS,
 )
 from .modbus_client import SolarMaxModbusClient, ModbusConnectionError
@@ -31,19 +34,28 @@ _LOGGER = logging.getLogger(__name__)
 
 STATUS_STANDBY = "standby"
 STATUS_LIVE = "live"
+STATUS_PERIODIC = "periodic"
 STATUS_CONNECTING = "connecting"
 STATUS_ERROR = "error"
 
-COUNTDOWN_TICK_SECONDS = 5  # how often the countdown sensors update
+COUNTDOWN_TICK_SECONDS = 1
+SLOW_POLL_RATIO = 6  # include slow sensors every 6th live-mode tick (6×10s = 60s)
 
 
 class SolarTouchLANCoordinator:
-    """Manages polling, connection lifecycle, and session timers."""
+    """Manages polling, connection lifecycle, and session timers.
+
+    In every mode the inverter connection is opened, data is pulled, then
+    immediately closed so the inverter can resume pushing data to the cloud.
+    """
 
     def __init__(self, hass: HomeAssistant, entry_data: dict) -> None:
         self.hass = hass
         self._mode = entry_data[CONF_CONNECTION_MODE]
         self._daily_sync = entry_data.get(CONF_DAILY_CLOUD_SYNC, False)
+        self._periodic_interval_minutes: int = entry_data.get(
+            CONF_PERIODIC_INTERVAL, PERIODIC_INTERVAL_DEFAULT
+        )
         self.client = SolarMaxModbusClient(
             host=entry_data["host"],
             port=entry_data["port"],
@@ -53,52 +65,52 @@ class SolarTouchLANCoordinator:
         self.status: str = STATUS_STANDBY
         self.last_poll: datetime | None = None
 
-        # Countdown values — calculated from end timestamps every 5s
         self.live_session_remaining: int = 0
         self.next_poll_in: int = 0
 
-        # Internal timestamps for countdown calculation
         self._live_session_end_time: datetime | None = None
-        self._next_fast_poll_at: datetime | None = None
-        self._current_fast_interval: int = SCAN_FAST_SECONDS
+        self._next_poll_at: datetime | None = None
+        self._poll_counter: int = 0
 
         self._fast_defs = [d for d in SENSOR_DEFINITIONS if d["fast"]]
         self._slow_defs = [d for d in SENSOR_DEFINITIONS if not d["fast"]]
 
-        self._fast_unsub = None
-        self._slow_unsub = None
+        self._poll_unsub = None
         self._countdown_unsub = None
         self._live_timer_handle = None
         self._cloud_sync_unsub = None
         self._cloud_sync_active = False
         self._cloud_sync_resume_handle = None
 
+        # Prevents overlapping connect/poll/disconnect cycles
+        self._poll_lock = asyncio.Lock()
+
         self._listeners: list[Any] = []
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     async def async_setup(self) -> None:
-        if self._mode == CONNECTION_MODE_ALWAYS_ON:
-            await self._async_connect()
-            self._start_polling()
-        else:
-            self.hass.async_create_task(self._async_initial_fetch())
-
+        await self._async_initial_fetch()
+        if self._mode == CONNECTION_MODE_LIVE:
+            self._start_live_polling()
+        elif self._mode == CONNECTION_MODE_PERIODIC:
+            self._start_periodic_polling()
         if self._daily_sync:
             self._schedule_next_cloud_sync()
 
     async def _async_initial_fetch(self) -> None:
-        """One-shot connect → poll → disconnect to populate values on startup."""
+        """Connect → poll all sensors → disconnect to populate state on startup."""
         self.status = STATUS_CONNECTING
         self._notify_listeners()
         try:
             await self.client.async_connect()
-            await self._async_poll_all()
+            await self._async_read_all()
+            self.last_poll = dt_util.utcnow()
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("Initial fetch failed: %s", err)
         finally:
             await self.client.async_disconnect()
-            self.status = STATUS_STANDBY
+            self.status = self._idle_status()
             self._notify_listeners()
 
     async def async_shutdown(self) -> None:
@@ -113,85 +125,80 @@ class SolarTouchLANCoordinator:
         await self.client.async_disconnect()
 
     async def async_go_live(self) -> None:
-        """Activate or extend a live session. Always resets the 5-min timer."""
-        if self._cloud_sync_active:
+        """Start or extend a 5-minute live session (standby mode only)."""
+        if self._cloud_sync_active or self._mode != CONNECTION_MODE_STANDBY:
             return
-        if self._mode == CONNECTION_MODE_ALWAYS_ON:
-            return
-        if not self.client.connected:
-            await self._async_connect()
-            self._start_polling(live=True)
-        else:
-            # Already live — restart at live speed and reset countdown
-            self._stop_polling()
-            self._start_polling(live=True)
+        if not self._poll_unsub:
+            self._start_session_polling()
         self._reset_live_timer(LIVE_SESSION_SECONDS)
+        self.status = STATUS_LIVE
 
     async def async_pause_sync(self) -> None:
-        """Stop any active sync/polling immediately and return to standby."""
+        """Stop any active polling and return to standby."""
         if self._live_timer_handle:
             self._live_timer_handle()
             self._live_timer_handle = None
         self._live_session_end_time = None
         self.live_session_remaining = 0
-        self.next_poll_in = 0
-        self._next_fast_poll_at = None
         self._stop_polling()
         await self.client.async_disconnect()
         self.status = STATUS_STANDBY
         self._notify_listeners()
 
     async def async_set_mode(self, mode: str) -> None:
-        """Switch between standby and always-on at runtime."""
+        """Switch between standby, periodic, and live at runtime."""
         if self._mode == mode:
             return
+        self._stop_polling()
+        if self._live_timer_handle:
+            self._live_timer_handle()
+            self._live_timer_handle = None
+        self._live_session_end_time = None
+        self.live_session_remaining = 0
+        await self.client.async_disconnect()
         self._mode = mode
-        if mode == CONNECTION_MODE_ALWAYS_ON:
-            if self._live_timer_handle:
-                self._live_timer_handle()
-                self._live_timer_handle = None
-            self._live_session_end_time = None
-            self.live_session_remaining = 0
-            await self._async_connect()
-            self._start_polling(live=False)
-        else:
-            self._stop_polling()
-            if self._live_timer_handle:
-                self._live_timer_handle()
-                self._live_timer_handle = None
-            self._live_session_end_time = None
-            self.live_session_remaining = 0
-            self.next_poll_in = 0
-            await self.client.async_disconnect()
-            self.status = STATUS_STANDBY
+        if mode == CONNECTION_MODE_LIVE:
+            self._poll_counter = 0
+            self._start_live_polling()
+        elif mode == CONNECTION_MODE_PERIODIC:
+            self._start_periodic_polling()
+        self.status = self._idle_status()
         self._notify_listeners()
 
+    async def async_set_periodic_interval(self, minutes: int) -> None:
+        """Change the periodic poll interval; restarts polling if currently active."""
+        self._periodic_interval_minutes = minutes
+        if self._mode == CONNECTION_MODE_PERIODIC and self._poll_unsub:
+            self._stop_polling()
+            self._start_periodic_polling()
+
     async def async_force_refresh(self) -> None:
-        """Immediately poll all sensors regardless of mode/timer."""
-        if not self.client.connected:
-            if self._mode == CONNECTION_MODE_STANDBY:
-                await self.async_go_live()
-                return
+        """Immediately connect, poll all sensors, and disconnect."""
         await self._async_poll_all()
 
     async def async_write_register(self, address: int, value: int, uint32: bool = False) -> None:
-        """Write a register and extend the live session."""
-        if not self.client.connected:
-            await self._async_connect()
-            self._start_polling(live=True)
-        try:
-            if uint32:
-                await self.client.async_write_register_uint32(address, value)
-            else:
-                await self.client.async_write_register(address, value)
-        except ModbusConnectionError as err:
-            _LOGGER.error("Write failed: %s", err)
-            self.status = STATUS_ERROR
-            self._notify_listeners()
-            return
+        """Connect, write a register, then disconnect."""
+        async with self._poll_lock:
+            try:
+                await self.client.async_connect()
+                if uint32:
+                    await self.client.async_write_register_uint32(address, value)
+                else:
+                    await self.client.async_write_register(address, value)
+            except ModbusConnectionError as err:
+                _LOGGER.error("Write failed: %s", err)
+                self.status = STATUS_ERROR
+                self._notify_listeners()
+                return
+            finally:
+                await self.client.async_disconnect()
 
         if self._mode == CONNECTION_MODE_STANDBY:
+            if not self._poll_unsub:
+                self._start_session_polling()
             self._reset_live_timer(WRITE_LINGER_SECONDS)
+            self.status = STATUS_LIVE
+            self._notify_listeners()
 
     def register_listener(self, callback_fn) -> None:
         self._listeners.append(callback_fn)
@@ -200,107 +207,153 @@ class SolarTouchLANCoordinator:
         if callback_fn in self._listeners:
             self._listeners.remove(callback_fn)
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
+    # ── Polling ───────────────────────────────────────────────────────────────
 
-    async def _async_connect(self) -> None:
-        self.status = STATUS_CONNECTING
-        self._notify_listeners()
-        try:
-            await self.client.async_connect()
-            self.status = STATUS_LIVE
-        except ModbusConnectionError as err:
-            _LOGGER.error("Connection failed: %s", err)
-            self.status = STATUS_ERROR
-        self._notify_listeners()
-
-    def _start_polling(self, live: bool = False) -> None:
-        if self._fast_unsub:
+    def _start_live_polling(self) -> None:
+        """30 s interval; connect → fast (+ slow every 10th tick) → disconnect."""
+        if self._poll_unsub:
             return
-        self._current_fast_interval = SCAN_LIVE_FAST_SECONDS if live else SCAN_FAST_SECONDS
-        self._fast_unsub = async_track_time_interval(
-            self.hass, self._async_fast_poll, timedelta(seconds=self._current_fast_interval)
+        self._next_poll_at = dt_util.utcnow() + timedelta(seconds=SCAN_FAST_SECONDS)
+        self._poll_unsub = async_track_time_interval(
+            self.hass, self._async_live_poll_tick, timedelta(seconds=SCAN_FAST_SECONDS)
         )
-        self._slow_unsub = async_track_time_interval(
-            self.hass, self._async_slow_poll, timedelta(seconds=SCAN_SLOW_SECONDS)
+        self._start_countdown_ticker()
+
+    def _start_session_polling(self) -> None:
+        """Fast polling for a standby Go Live session; also fires an immediate full poll."""
+        if self._poll_unsub:
+            return
+        self._next_poll_at = dt_util.utcnow() + timedelta(seconds=SCAN_LIVE_FAST_SECONDS)
+        self._poll_unsub = async_track_time_interval(
+            self.hass, self._async_session_poll_tick, timedelta(seconds=SCAN_LIVE_FAST_SECONDS)
         )
-        # Countdown ticker — updates Live Session Remaining and Next Poll In every 5s
+        self._start_countdown_ticker()
+        self.hass.async_create_task(self._async_poll_all())
+
+    def _start_periodic_polling(self) -> None:
+        """N-minute interval; connect → poll all → disconnect."""
+        if self._poll_unsub:
+            return
+        interval_secs = self._periodic_interval_minutes * 60
+        self._next_poll_at = dt_util.utcnow() + timedelta(seconds=interval_secs)
+        self._poll_unsub = async_track_time_interval(
+            self.hass, self._async_periodic_poll_tick, timedelta(seconds=interval_secs)
+        )
+        self._start_countdown_ticker()
+
+    def _start_countdown_ticker(self) -> None:
+        if self._countdown_unsub:
+            return
         self._countdown_unsub = async_track_time_interval(
             self.hass, self._async_tick_countdowns, timedelta(seconds=COUNTDOWN_TICK_SECONDS)
         )
-        # Set first "next poll" expectation
-        self._next_fast_poll_at = dt_util.utcnow() + timedelta(seconds=self._current_fast_interval)
-        self.hass.async_create_task(self._async_poll_all())
 
     def _stop_polling(self) -> None:
-        for attr in ("_fast_unsub", "_slow_unsub", "_countdown_unsub"):
-            unsub = getattr(self, attr)
-            if unsub:
-                unsub()
-                setattr(self, attr, None)
-        self._next_fast_poll_at = None
+        if self._poll_unsub:
+            self._poll_unsub()
+            self._poll_unsub = None
+        if self._countdown_unsub:
+            self._countdown_unsub()
+            self._countdown_unsub = None
+        self._next_poll_at = None
         self.next_poll_in = 0
 
     @callback
     def _async_tick_countdowns(self, _now=None) -> None:
-        """Called every 5s to update Live Session Remaining and Next Poll In."""
         now = dt_util.utcnow()
-
         if self._live_session_end_time:
-            remaining = (self._live_session_end_time - now).total_seconds()
-            self.live_session_remaining = max(0, int(remaining))
+            self.live_session_remaining = max(
+                0, int((self._live_session_end_time - now).total_seconds())
+            )
         else:
             self.live_session_remaining = 0
-
-        if self._next_fast_poll_at:
-            until_poll = (self._next_fast_poll_at - now).total_seconds()
-            self.next_poll_in = max(0, int(until_poll))
+        if self._next_poll_at:
+            self.next_poll_in = max(0, int((self._next_poll_at - now).total_seconds()))
         else:
             self.next_poll_in = 0
-
         self._notify_listeners()
 
-    async def _async_fast_poll(self, _now=None) -> None:
-        if not self.client.connected:
+    async def _async_live_poll_tick(self, _now=None) -> None:
+        """Live mode tick: connect → fast sensors (+ slow every 10th) → disconnect."""
+        if self._cloud_sync_active:
             return
-        # Update next poll expectation immediately
-        self._next_fast_poll_at = dt_util.utcnow() + timedelta(seconds=self._current_fast_interval)
-        try:
-            new_data = await self.client.async_read_registers_batch(self._fast_defs)
-            self.data.update(new_data)
-            self.last_poll = dt_util.utcnow()
-        except ModbusConnectionError as err:
-            _LOGGER.warning("Fast poll error: %s", err)
-            self.status = STATUS_ERROR
+        async with self._poll_lock:
+            self._poll_counter += 1
+            include_slow = (self._poll_counter % SLOW_POLL_RATIO == 0)
+            self._next_poll_at = dt_util.utcnow() + timedelta(seconds=SCAN_FAST_SECONDS)
+            try:
+                await self.client.async_connect()
+                new_data = await self.client.async_read_registers_batch(self._fast_defs)
+                if include_slow:
+                    slow_data = await self.client.async_read_registers_batch(self._slow_defs)
+                    new_data.update(slow_data)
+                self.data.update(new_data)
+                self.last_poll = dt_util.utcnow()
+                if self.status == STATUS_ERROR:
+                    self.status = STATUS_LIVE
+            except ModbusConnectionError as err:
+                _LOGGER.warning("Live poll error: %s", err)
+                self.status = STATUS_ERROR
+            finally:
+                await self.client.async_disconnect()
         self._notify_listeners()
 
-    async def _async_slow_poll(self, _now=None) -> None:
-        if not self.client.connected:
+    async def _async_session_poll_tick(self, _now=None) -> None:
+        """Go Live session tick: connect → fast sensors → disconnect."""
+        if self._cloud_sync_active:
             return
-        try:
-            new_data = await self.client.async_read_registers_batch(self._slow_defs)
-            self.data.update(new_data)
-            self.last_poll = dt_util.utcnow()
-        except ModbusConnectionError as err:
-            _LOGGER.warning("Slow poll error: %s", err)
-            self.status = STATUS_ERROR
+        async with self._poll_lock:
+            self._next_poll_at = dt_util.utcnow() + timedelta(seconds=SCAN_LIVE_FAST_SECONDS)
+            try:
+                await self.client.async_connect()
+                new_data = await self.client.async_read_registers_batch(self._fast_defs)
+                self.data.update(new_data)
+                self.last_poll = dt_util.utcnow()
+            except ModbusConnectionError as err:
+                _LOGGER.warning("Session poll error: %s", err)
+                self.status = STATUS_ERROR
+            finally:
+                await self.client.async_disconnect()
         self._notify_listeners()
+
+    async def _async_periodic_poll_tick(self, _now=None) -> None:
+        """Periodic mode tick: update next-poll countdown then poll all."""
+        if self._cloud_sync_active:
+            return
+        self._next_poll_at = dt_util.utcnow() + timedelta(
+            minutes=self._periodic_interval_minutes
+        )
+        await self._async_poll_all()
 
     async def _async_poll_all(self) -> None:
-        if not self.client.connected:
-            return
-        self._next_fast_poll_at = dt_util.utcnow() + timedelta(seconds=self._current_fast_interval)
-        try:
-            fast = await self.client.async_read_registers_batch(self._fast_defs)
-            slow = await self.client.async_read_registers_batch(self._slow_defs)
-            self.data.update(fast)
-            self.data.update(slow)
-            self.last_poll = dt_util.utcnow()
-            if self.status == STATUS_ERROR:
-                self.status = STATUS_LIVE
-        except ModbusConnectionError as err:
-            _LOGGER.warning("Full poll error: %s", err)
-            self.status = STATUS_ERROR
+        """Connect → poll every sensor → disconnect."""
+        async with self._poll_lock:
+            try:
+                await self.client.async_connect()
+                await self._async_read_all()
+                self.last_poll = dt_util.utcnow()
+                if self.status == STATUS_ERROR:
+                    self.status = self._idle_status()
+            except ModbusConnectionError as err:
+                _LOGGER.warning("Full poll error: %s", err)
+                self.status = STATUS_ERROR
+            finally:
+                await self.client.async_disconnect()
         self._notify_listeners()
+
+    async def _async_read_all(self) -> None:
+        """Read fast and slow registers (connection must already be open)."""
+        fast = await self.client.async_read_registers_batch(self._fast_defs)
+        slow = await self.client.async_read_registers_batch(self._slow_defs)
+        self.data.update(fast)
+        self.data.update(slow)
+
+    def _idle_status(self) -> str:
+        if self._mode == CONNECTION_MODE_LIVE:
+            return STATUS_LIVE
+        if self._mode == CONNECTION_MODE_PERIODIC:
+            return STATUS_PERIODIC
+        return STATUS_STANDBY
 
     def _reset_live_timer(self, seconds: int) -> None:
         if self._live_timer_handle:
@@ -337,27 +390,28 @@ class SolarTouchLANCoordinator:
         )
 
     async def _async_cloud_sync_start(self, _now=None) -> None:
-        _LOGGER.info("Daily cloud sync: pausing local connection for %s seconds", CLOUD_SYNC_PAUSE_SECONDS)
+        _LOGGER.info("Daily cloud sync: pausing for %s seconds", CLOUD_SYNC_PAUSE_SECONDS)
         self._cloud_sync_active = True
         self._cloud_sync_unsub = None
-        if self.client.connected:
-            self._stop_polling()
-            await self.client.async_disconnect()
-            self.status = STATUS_STANDBY
-            self._notify_listeners()
+        self._stop_polling()
+        await self.client.async_disconnect()
+        self.status = STATUS_STANDBY
+        self._notify_listeners()
         resume_at = dt_util.utcnow() + timedelta(seconds=CLOUD_SYNC_PAUSE_SECONDS)
         self._cloud_sync_resume_handle = async_track_point_in_time(
             self.hass, self._async_cloud_sync_end, resume_at
         )
 
     async def _async_cloud_sync_end(self, _now=None) -> None:
-        _LOGGER.info("Daily cloud sync: resuming local connection")
+        _LOGGER.info("Daily cloud sync: resuming")
         self._cloud_sync_active = False
         self._cloud_sync_resume_handle = None
         self._schedule_next_cloud_sync()
-        if self._mode == CONNECTION_MODE_ALWAYS_ON:
-            await self._async_connect()
-            self._start_polling()
+        if self._mode == CONNECTION_MODE_LIVE:
+            self._start_live_polling()
+        elif self._mode == CONNECTION_MODE_PERIODIC:
+            self._start_periodic_polling()
+        self.status = self._idle_status()
         self._notify_listeners()
 
     @callback

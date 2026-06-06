@@ -13,8 +13,9 @@ from homeassistant.const import CONF_HOST, CONF_NAME
 from .const import (
     CONF_CONNECTION_MODE,
     CONF_DAILY_CLOUD_SYNC,
-    CONNECTION_MODE_ALWAYS_ON,
     CONNECTION_MODE_STANDBY,
+    CONNECTION_MODE_PERIODIC,
+    CONNECTION_MODE_LIVE,
     DOMAIN,
     PORT_DEFAULT,
     SLAVE_DEFAULT,
@@ -77,8 +78,9 @@ class SolarTouchLANConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_HOST, description={"suggested_value": "192.168.1.2"}): str,
                     vol.Required(CONF_CONNECTION_MODE, default=CONNECTION_MODE_STANDBY): vol.In(
                         {
-                            CONNECTION_MODE_STANDBY: "Standby (recommended — preserves cloud sync)",
-                            CONNECTION_MODE_ALWAYS_ON: "Always On (blocks cloud sync)",
+                            CONNECTION_MODE_STANDBY: "Standby — no auto-refresh, cloud sync always works",
+                            CONNECTION_MODE_PERIODIC: "Periodic — poll every N minutes (set interval after setup)",
+                            CONNECTION_MODE_LIVE: "Live — poll every 30 s (most responsive, may reduce cloud sync)",
                         }
                     ),
                     vol.Optional(CONF_DAILY_CLOUD_SYNC, default=True): bool,
@@ -86,8 +88,8 @@ class SolarTouchLANConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
             description_placeholders={
                 "cloud_warning": (
-                    "⚠️ Always On mode will block data from reaching "
-                    "SolarTouch app and cloudinverter.net."
+                    "⚠️ In all modes the connection is closed immediately after "
+                    "each poll so the inverter can push data to the cloud."
                 )
             },
             errors=errors,

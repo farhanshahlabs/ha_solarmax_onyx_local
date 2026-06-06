@@ -13,7 +13,7 @@
         "data_description": {
           "name": "A friendly name for this inverter (e.g. My Solar Inverter)",
           "host": "The local IP address of your inverter (e.g. 192.168.1.2)",
-          "connection_mode": "Standby mode is recommended if you use the SolarTouch app",
+          "connection_mode": "Standby is recommended. Periodic polls on a schedule. Live polls every 30 s.",
           "daily_cloud_sync": "Lets the inverter send one daily data point to cloudinverter.net at end of day"
         }
       }

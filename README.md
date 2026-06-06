@@ -7,51 +7,98 @@ Local Modbus TCP integration for **SolarMax Onyx hybrid inverters** — no cloud
 
 ---
 
-## ⚠️ Important — Cloud Sync Warning
+## ⚠️ Important — Cloud Sync
 
-> When this integration is active in **Always On** mode, the inverter **will not send data** to the SolarTouch app or [cloudinverter.net](https://cloudinverter.net). This is a hardware limitation of the SolarMax Onyx inverter — it cannot maintain a local Modbus TCP connection and a cloud connection at the same time.
+> The SolarMax Onyx inverter cannot maintain a local Modbus TCP connection and a cloud connection at the same time. This integration **closes the connection immediately after every poll** so the inverter is free to push data to the SolarTouch app / [cloudinverter.net](https://cloudinverter.net) between polls.
 >
-> Use **Standby mode** if you need cloud data during the day, or enable the **Daily Cloud Sync** option to automatically pause the local connection at 23:45 each night so the inverter can push one end-of-day data point to the cloud before midnight.
+> Use **Standby** or **Periodic** mode if you need regular cloud data. Enable the **Daily Cloud Sync** option to automatically pause local polling at 23:45 so the inverter can push one end-of-day data point before midnight.
 
 ---
 
 ## Features
 
 - **Local only** — communicates directly with the inverter over your LAN via Modbus TCP (port 502)
-- **Two connection modes:**
-  - **Standby** (recommended) — connection stays closed; press **Go Live** to activate a 5-minute live session
-  - **Always On** — connection stays open continuously for real-time data
+- **Three connection modes:**
+  - **Standby** (recommended) — no automatic polling; press **Go Live** for a 5-minute live session or **Refresh Now** for a one-shot poll
+  - **Periodic** — automatically polls every N minutes (configurable 1–60 min via the **Periodic Poll Interval** control)
+  - **Live** — polls fast sensors every 10 s and slow sensors every 60 s
+- **Connect → poll → disconnect** — in every mode the connection is opened, data is fetched, and then immediately closed so the inverter resumes cloud sync
 - **On-demand refresh** — press **Refresh Now** to instantly poll all sensors
-- **Writable controls** — change operation mode, charge/discharge limits, and smart load thresholds directly from the Home Assistant UI
-- **Daily cloud sync** — optional automatic 6-minute pause at 23:45 to let the inverter sync to SolarTouch / cloudinverter.net
+- **Writable controls** — change operation mode, charge/discharge limits, and smart load thresholds directly from HA
+- **Daily cloud sync** — optional automatic 6-minute pause at 23:45
 - **HACS compatible** — install and update directly from HACS
 
 ---
 
 ## Sensors
 
-### Fast sensors (updated every 30 seconds)
+Entities are grouped into three sections on the device page:
+
+### Part 1 — Data Sync (Diagnostic)
+| Sensor | Description |
+|---|---|
+| Connection Status | Current coordinator state: `standby`, `live`, `periodic`, `connecting`, `error` |
+| Daily Cloud Sync Active | `on` during the nightly 6-minute cloud sync pause |
+| Last Successful Poll | Timestamp of the last successful Modbus read |
+| Live Session Remaining | Seconds left in a Go Live session (standby mode) |
+| Next Poll In | Seconds until the next automatic poll — updates every second |
+
+### Part 2 — Configuration Registers (Configuration)
+These sensors mirror the value of a writable register and sit next to their write controls in the Configuration section.
+
+| Sensor | Register |
+|---|---|
+| Battery Charging Max Power | 8472 |
+| Maximum Grid Charging Power | 8470 |
+| Stop Grid Charging Battery SOC | 8471 |
+| Battery Stop Charging Maximum SOC | 8473 |
+| Discharge End SOC (on grid) | 8522 |
+| Discharge End SOC (on battery) | 8475 |
+| Max Grid Export Power | 12473 |
+| Smart Load Turn ON Battery SOC | 8492 |
+| Smart Load Turn OFF Battery SOC | 8493 |
+| Inverter Operation Mode Raw | 8448 |
+| Off-Grid Mode | 8476 |
+
+### Part 3 — Inverter Data (Sensors)
+
+**Fast sensors (updated every 10 s in Live mode)**
 - Live PV Total Power
-- PV1/PV2 Voltage, Current, Power
+- PV1 / PV2 Voltage, Current, Power
 - Battery Power, State of Charge
 - Load Power, Grid Power
 - CT Clamp Power, Light Load Power
 
-### Slow sensors (updated every 5 minutes)
+**Slow sensors (updated every 60 s in Live mode)**
 - Battery temperature, voltage, current
 - Battery charge/discharge energy (today + lifetime)
 - Grid import/export energy (today + lifetime)
 - Solar energy produced (today + lifetime)
 - Inverter temperature, operating hours
 - Grid frequency, load voltage/current
-- Smart load power and SOC thresholds
-- Operation mode, charge/discharge limits
+- Smart load power
+- Peak production power today
 
 ---
 
-## Writable Controls
+## Controls
 
-All controls appear as native Home Assistant entities (no YAML helpers needed):
+All controls appear in the **Controls** section of the device page:
+
+| Control | Type | Description |
+|---|---|---|
+| Sync Mode | Select | Switch between Standby / Periodic / Live |
+| Periodic Poll Interval | Number (1–60 min) | Interval for Periodic mode |
+| Go Live 5 Min | Button | Start a 5-minute live session (standby mode) |
+| Refresh Now | Button | Immediate one-shot poll |
+| Pause Sync | Button | Stop any active polling and return to standby |
+| Live Mode | Switch | Quick toggle between Live and Standby |
+
+---
+
+## Configuration Section
+
+Writable inverter registers — changes are written directly to the inverter via Modbus:
 
 | Control | Type |
 |---|---|
@@ -66,7 +113,15 @@ All controls appear as native Home Assistant entities (no YAML helpers needed):
 | Smart Load Turn ON Battery SOC | Number |
 | Smart Load Turn OFF Battery SOC | Number |
 
-In **Standby mode**, changing any control automatically activates a live session so the write is confirmed.
+---
+
+## Poll Intervals Summary
+
+| Mode | Fast sensors | Slow sensors | Notes |
+|---|---|---|---|
+| Standby | — | — | No auto-poll; Go Live = 5 s per tick |
+| Periodic | All sensors | All sensors | Every N minutes (default 5) |
+| Live | Every 10 s | Every 60 s | Connection closed after every tick |
 
 ---
 

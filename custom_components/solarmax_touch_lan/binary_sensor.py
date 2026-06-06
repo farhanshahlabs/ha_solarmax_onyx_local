@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -22,8 +23,9 @@ async def async_setup_entry(
 class CloudSyncActiveSensor(BinarySensorEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
-    _attr_name = "Daily Cloud Sync Active"
+    _attr_name = "05. Daily Cloud Sync Active"
     _attr_icon = "mdi:cloud-sync-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
