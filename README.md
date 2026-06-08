@@ -154,6 +154,22 @@ Writable inverter registers — changes are written directly to the inverter via
 
 ---
 
+## Feedback & Support
+
+Found a bug or have a feature request? Contributions and feedback are welcome.
+
+- **Bug reports & feature requests** — open an issue on the [GitHub Issues](https://github.com/farhanshahlabs/ha_solarmax_onyx_local/issues) page
+- **Questions** — use [GitHub Discussions](https://github.com/farhanshahlabs/ha_solarmax_onyx_local/discussions) for general questions or help getting set up
+- **Pull requests** — PRs are welcome; please describe what register/feature you are adding and include the source (e.g. inverter manual page or Modbus map)
+
+When reporting a bug, please include:
+1. Home Assistant version
+2. Integration version (shown in **Settings → Integrations → SolarTouch LAN**)
+3. Your inverter model
+4. Relevant log lines from **Settings → System → Logs**
+
+---
+
 ## Related
 
 - [SolarTouch](https://github.com/farhanshahlabs/ha_solarmax_onyx) — cloud-based integration using the SolarTouch API (requires internet)

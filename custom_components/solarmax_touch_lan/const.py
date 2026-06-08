@@ -161,7 +161,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "18. Battery Power",
+        "name": "21. Battery Power",
         "key": "battery_power",
         "register": 8201,
         "data_type": "int32",
@@ -173,7 +173,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "19. Battery State of Charge",
+        "name": "22. Battery State of Charge",
         "key": "battery_soc",
         "register": 8192,
         "data_type": "uint16",
@@ -185,7 +185,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "35. Load Power",
+        "name": "38. Load Power",
         "key": "load_power",
         "register": 4875,
         "data_type": "int32",
@@ -197,7 +197,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "27. Grid Power",
+        "name": "30. Grid Power",
         "key": "grid_power",
         "register": 4865,
         "data_type": "int32",
@@ -209,7 +209,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "29. Inverter CT Clamp Power",
+        "name": "32. Inverter CT Clamp Power",
         "key": "inverter_ct_clamp_power",
         "register": 4864,
         "data_type": "int32",
@@ -221,7 +221,7 @@ SENSOR_DEFINITIONS = [
         "fast": True,
     },
     {
-        "name": "38. Light Load Power",
+        "name": "41. Light Load Power",
         "key": "light_load_power",
         "register": 4947,
         "data_type": "int32",
@@ -234,7 +234,7 @@ SENSOR_DEFINITIONS = [
     },
     # ── SLOW sensors (5 min) ──────────────────────────────────────────────────
     {
-        "name": "22. Battery Temperature",
+        "name": "25. Battery Temperature",
         "key": "battery_temperature",
         "register": 8220,
         "data_type": "int16",
@@ -246,7 +246,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "20. Battery Voltage",
+        "name": "23. Battery Voltage",
         "key": "battery_voltage",
         "register": 8198,
         "data_type": "uint16",
@@ -258,7 +258,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "21. Battery Current",
+        "name": "24. Battery Current",
         "key": "battery_current",
         "register": 8200,
         "data_type": "int32",
@@ -270,7 +270,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "23. Today Battery Energy Charge",
+        "name": "26. Today Battery Energy Charge",
         "key": "battery_charge_energy_today",
         "register": 8203,
         "data_type": "uint32",
@@ -282,7 +282,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "24. Battery Charge Lifetime Energy",
+        "name": "27. Battery Charge Lifetime Energy",
         "key": "battery_charge_lifetime_energy",
         "register": 8205,
         "data_type": "uint32",
@@ -294,7 +294,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "25. Battery Discharge Energy Today",
+        "name": "28. Battery Discharge Energy Today",
         "key": "battery_discharge_energy_today",
         "register": 8207,
         "data_type": "uint32",
@@ -306,7 +306,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "26. Battery Discharge Lifetime Energy",
+        "name": "29. Battery Discharge Lifetime Energy",
         "key": "battery_discharge_lifetime_energy",
         "register": 8209,
         "data_type": "uint32",
@@ -414,7 +414,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "30. Grid Frequency",
+        "name": "33. Grid Frequency",
         "key": "grid_frequency",
         "register": 4920,
         "data_type": "uint16",
@@ -426,7 +426,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "46. Smart Load Power",
+        "name": "49. Smart Load Power",
         "key": "smart_load_power",
         "register": 4974,
         "data_type": "int16",
@@ -462,7 +462,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "44. Inverter Internal Temperature",
+        "name": "47. Inverter Internal Temperature",
         "key": "inverter_internal_temperature",
         "register": 4124,
         "data_type": "int16",
@@ -474,7 +474,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "40. Energy Produced Today",
+        "name": "43. Energy Produced Today",
         "key": "energy_produced_today",
         "register": 4135,
         "data_type": "uint32",
@@ -486,7 +486,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "41. Energy Produced Lifetime",
+        "name": "44. Energy Produced Lifetime",
         "key": "energy_produced_lifetime",
         "register": 4130,
         "data_type": "uint32",
@@ -498,7 +498,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "45. Inverter Operating Hours",
+        "name": "48. Inverter Operating Hours",
         "key": "inverter_operating_hours",
         "register": 4132,
         "data_type": "uint32",
@@ -510,7 +510,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "42. Peak Production Power Today",
+        "name": "45. Peak Production Power Today",
         "key": "peak_production_power_today",
         "register": 4155,
         "data_type": "int32",
@@ -522,7 +522,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "32. Energy Import Lifetime",
+        "name": "35. Energy Import Lifetime",
         "key": "energy_import_lifetime",
         "register": 4870,
         "data_type": "uint32",
@@ -534,7 +534,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "31. Energy Import Today",
+        "name": "34. Energy Import Today",
         "key": "energy_import_today",
         "register": 4915,
         "data_type": "uint32",
@@ -546,7 +546,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "34. Energy Export Lifetime",
+        "name": "37. Energy Export Lifetime",
         "key": "energy_export_lifetime",
         "register": 4872,
         "data_type": "uint32",
@@ -558,7 +558,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "33. Energy Export Today",
+        "name": "36. Energy Export Today",
         "key": "energy_export_today",
         "register": 4917,
         "data_type": "uint32",
@@ -570,7 +570,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "36. Load Voltage",
+        "name": "39. Load Voltage",
         "key": "load_voltage",
         "register": 4900,
         "data_type": "uint16",
@@ -582,7 +582,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "37. Load Current",
+        "name": "40. Load Current",
         "key": "load_current",
         "register": 4904,
         "data_type": "int32",
@@ -594,7 +594,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "39. Light Load Lifetime Energy",
+        "name": "42. Light Load Lifetime Energy",
         "key": "light_load_lifetime_energy",
         "register": 4962,
         "data_type": "int32",
@@ -606,7 +606,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "28. Grid Export Power",
+        "name": "31. Grid Export Power",
         "key": "grid_export_power",
         "register": 4099,
         "data_type": "int32",
@@ -618,7 +618,7 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "43. Inverter Solar Conversion Power",
+        "name": "46. Inverter Solar Conversion Power",
         "key": "inverter_solar_conversion_power",
         "register": 4151,
         "data_type": "int32",
