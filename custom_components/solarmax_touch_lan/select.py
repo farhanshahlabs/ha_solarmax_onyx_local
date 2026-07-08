@@ -111,6 +111,9 @@ class InverterOperationModeSelect(SelectEntity):
         value = OPERATION_MODE_OPTIONS.get(option)
         if value is None:
             return
-        await self._coordinator.async_write_register(OPERATION_MODE_REGISTER, value)
-        self._coordinator.data["inverter_operation_mode_raw"] = value
+        success = await self._coordinator.async_write_register(
+            OPERATION_MODE_REGISTER, value
+        )
+        if success:
+            self._coordinator.data["inverter_operation_mode_raw"] = value
         self.async_write_ha_state()

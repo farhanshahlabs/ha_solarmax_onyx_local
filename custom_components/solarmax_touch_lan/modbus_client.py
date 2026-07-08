@@ -140,9 +140,24 @@ class SolarMaxModbusClient:
                     continue
                 try:
                     raw = _decode(chunk, defn["data_type"], defn.get("swap", False))
-                    results[defn["key"]] = round(raw * defn["scale"], 3)
+                    value = round(raw * defn["scale"], 3)
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.debug("Decode error for %s: %s", defn["key"], err)
+                    continue
+
+                # Reject out-of-range readings. The inverter/BMS returns a
+                # sentinel (e.g. 0xFFFF -> 65535) when a value is not yet
+                # populated; scaling that would publish a nonsense spike.
+                lo = defn.get("min")
+                hi = defn.get("max")
+                if (lo is not None and value < lo) or (hi is not None and value > hi):
+                    _LOGGER.debug(
+                        "Discarding out-of-range %s reading: %s (valid %s..%s)",
+                        defn["key"], value, lo, hi,
+                    )
+                    continue
+
+                results[defn["key"]] = value
 
         return results
 

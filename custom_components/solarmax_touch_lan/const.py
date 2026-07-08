@@ -17,7 +17,7 @@ CONNECTION_MODE_ALWAYS_ON = CONNECTION_MODE_LIVE  # legacy alias
 PERIODIC_INTERVAL_DEFAULT = 5  # minutes
 
 LIVE_SESSION_SECONDS = 300       # 5 minutes
-WRITE_LINGER_SECONDS = 60        # 1 minute after a write
+WRITE_LINGER_SECONDS = 30        # fast-poll burst after a write so the effect is visible immediately
 CLOUD_SYNC_PAUSE_SECONDS = 360   # 6 minutes at 23:45
 CLOUD_SYNC_HOUR = 23
 CLOUD_SYNC_MINUTE = 45
@@ -35,6 +35,9 @@ PORT_DEFAULT = 502
 #
 # data_type: "uint16" | "uint32" | "int16" | "int32"
 # swap_words: True → read two registers and swap word order before combining
+# min / max (optional): valid range in scaled units. Readings outside this
+#   range are discarded as junk (e.g. a 0xFFFF=65535 "no data" sentinel),
+#   leaving the entity at its previous value instead of spiking.
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
@@ -183,6 +186,8 @@ SENSOR_DEFINITIONS = [
         "state_class": SensorStateClass.MEASUREMENT,
         "swap": False,
         "fast": True,
+        "min": 0,
+        "max": 100,
     },
     {
         "name": "38. Load Power",
@@ -328,6 +333,8 @@ SENSOR_DEFINITIONS = [
         "state_class": SensorStateClass.MEASUREMENT,
         "swap": False,
         "fast": False,
+        "min": 0,
+        "max": 100,
     },
     {
         "name": "07. Discharge End SOC (on grid)",
@@ -340,6 +347,8 @@ SENSOR_DEFINITIONS = [
         "state_class": SensorStateClass.MEASUREMENT,
         "swap": False,
         "fast": False,
+        "min": 0,
+        "max": 100,
     },
     {
         "name": "Off-Grid Mode",
@@ -388,6 +397,8 @@ SENSOR_DEFINITIONS = [
         "state_class": SensorStateClass.MEASUREMENT,
         "swap": False,
         "fast": False,
+        "min": 0,
+        "max": 100,
     },
     {
         "name": "03. Battery Charging Max Power",
@@ -412,6 +423,8 @@ SENSOR_DEFINITIONS = [
         "state_class": SensorStateClass.MEASUREMENT,
         "swap": False,
         "fast": False,
+        "min": 0,
+        "max": 100,
     },
     {
         "name": "33. Grid Frequency",
@@ -448,6 +461,8 @@ SENSOR_DEFINITIONS = [
         "state_class": SensorStateClass.MEASUREMENT,
         "swap": False,
         "fast": False,
+        "min": 0,
+        "max": 100,
     },
     {
         "name": "10. Smart Load Turn OFF Battery SOC",
@@ -460,6 +475,8 @@ SENSOR_DEFINITIONS = [
         "state_class": SensorStateClass.MEASUREMENT,
         "swap": False,
         "fast": False,
+        "min": 0,
+        "max": 100,
     },
     {
         "name": "47. Inverter Internal Temperature",

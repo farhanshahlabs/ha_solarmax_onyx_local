@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval, async_track_point_in_time
 import homeassistant.util.dt as dt_util
@@ -41,6 +42,13 @@ STATUS_ERROR = "error"
 COUNTDOWN_TICK_SECONDS = 1
 SLOW_POLL_RATIO = 6  # include slow sensors every 6th live-mode tick (6×10s = 60s)
 
+# Register-write retry/verify: the inverter intermittently drops writes, so
+# every write is read back and retried until the register actually holds the
+# requested value.
+WRITE_MAX_ATTEMPTS = 3
+WRITE_VERIFY_SETTLE_SECONDS = 0.5  # let the inverter apply the write before reading back
+WRITE_RETRY_DELAY_SECONDS = 1.0    # wait between failed attempts
+
 
 class SolarTouchLANCoordinator:
     """Manages polling, connection lifecycle, and session timers.
@@ -49,8 +57,10 @@ class SolarTouchLANCoordinator:
     immediately closed so the inverter can resume pushing data to the cloud.
     """
 
-    def __init__(self, hass: HomeAssistant, entry_data: dict) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
+        self._entry = entry
+        entry_data = entry.data
         self._mode = entry_data[CONF_CONNECTION_MODE]
         self._daily_sync = entry_data.get(CONF_DAILY_CLOUD_SYNC, False)
         self._periodic_interval_minutes: int = entry_data.get(
@@ -86,6 +96,25 @@ class SolarTouchLANCoordinator:
         self._poll_lock = asyncio.Lock()
 
         self._listeners: list[Any] = []
+
+    # ── Persistence ───────────────────────────────────────────────────────────
+
+    @callback
+    def _persist_config(self) -> None:
+        """Write the current runtime settings back to the config entry.
+
+        Without this, mode / interval changes live only in memory and are lost
+        on restart, reverting to the value chosen during initial setup.
+        """
+        self.hass.config_entries.async_update_entry(
+            self._entry,
+            data={
+                **self._entry.data,
+                CONF_CONNECTION_MODE: self._mode,
+                CONF_PERIODIC_INTERVAL: self._periodic_interval_minutes,
+                CONF_DAILY_CLOUD_SYNC: self._daily_sync,
+            },
+        )
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -163,6 +192,7 @@ class SolarTouchLANCoordinator:
         elif mode == CONNECTION_MODE_PERIODIC:
             self._start_periodic_polling()
         self.status = self._idle_status()
+        self._persist_config()
         self._notify_listeners()
 
     async def async_set_periodic_interval(self, minutes: int) -> None:
@@ -171,34 +201,98 @@ class SolarTouchLANCoordinator:
         if self._mode == CONNECTION_MODE_PERIODIC and self._poll_unsub:
             self._stop_polling()
             self._start_periodic_polling()
+        self._persist_config()
 
     async def async_force_refresh(self) -> None:
         """Immediately connect, poll all sensors, and disconnect."""
         await self._async_poll_all()
 
-    async def async_write_register(self, address: int, value: int, uint32: bool = False) -> None:
-        """Connect, write a register, then disconnect."""
+    async def async_write_register(
+        self, address: int, value: int, uint32: bool = False
+    ) -> bool:
+        """Connect, write a register, verify the read-back, retry, then disconnect.
+
+        The inverter sometimes accepts the connection but silently ignores the
+        write, so the next poll reads the old value back and the UI appears to
+        "revert". To avoid that, after each write the register is read back and
+        compared; if it does not match, the write is retried up to
+        ``WRITE_MAX_ATTEMPTS`` times. Returns True only when the register is
+        confirmed to hold ``value``.
+        """
+        data_type = "uint32" if uint32 else "uint16"
+        success = False
+        last_readback: int | float | None = None
+
         async with self._poll_lock:
             try:
                 await self.client.async_connect()
-                if uint32:
-                    await self.client.async_write_register_uint32(address, value)
-                else:
-                    await self.client.async_write_register(address, value)
+                for attempt in range(1, WRITE_MAX_ATTEMPTS + 1):
+                    try:
+                        if uint32:
+                            await self.client.async_write_register_uint32(address, value)
+                        else:
+                            await self.client.async_write_register(address, value)
+                        await asyncio.sleep(WRITE_VERIFY_SETTLE_SECONDS)
+                        last_readback = await self.client.async_read_register(
+                            address, data_type
+                        )
+                    except ModbusConnectionError as err:
+                        _LOGGER.warning(
+                            "Register %s write attempt %d/%d errored: %s",
+                            address, attempt, WRITE_MAX_ATTEMPTS, err,
+                        )
+                    else:
+                        if int(last_readback) == int(value):
+                            success = True
+                            if attempt > 1:
+                                _LOGGER.info(
+                                    "Register %s set to %s confirmed on attempt %d",
+                                    address, value, attempt,
+                                )
+                            break
+                        _LOGGER.warning(
+                            "Register %s write not applied (wrote %s, read back %s); "
+                            "attempt %d/%d",
+                            address, value, last_readback, attempt, WRITE_MAX_ATTEMPTS,
+                        )
+                    if attempt < WRITE_MAX_ATTEMPTS:
+                        await asyncio.sleep(WRITE_RETRY_DELAY_SECONDS)
             except ModbusConnectionError as err:
-                _LOGGER.error("Write failed: %s", err)
-                self.status = STATUS_ERROR
-                self._notify_listeners()
-                return
+                _LOGGER.error("Write to register %s failed to connect: %s", address, err)
             finally:
                 await self.client.async_disconnect()
 
-        if self._mode == CONNECTION_MODE_STANDBY:
-            if not self._poll_unsub:
-                self._start_session_polling()
-            self._reset_live_timer(WRITE_LINGER_SECONDS)
-            self.status = STATUS_LIVE
-            self._notify_listeners()
+        if not success:
+            _LOGGER.error(
+                "Register %s not confirmed at %s after %d attempts (last read: %s); "
+                "the inverter may have rejected the write",
+                address, value, WRITE_MAX_ATTEMPTS, last_readback,
+            )
+
+        # Briefly poll fast after every write so the change (or its rejection)
+        # is reflected immediately, and any transient error from the write's
+        # read-back clears on the next successful poll.
+        self._begin_post_write_burst()
+        return success
+
+    def _begin_post_write_burst(self) -> None:
+        """Enter a short fast-polling window after a register write.
+
+        Makes the effect of a setting change visible right away. In Live mode
+        polling is already fast, so just trigger an immediate poll; in Standby
+        or Periodic mode, switch to fast session polling for
+        ``WRITE_LINGER_SECONDS`` then restore the mode's normal polling.
+        """
+        if self._cloud_sync_active:
+            return
+        if self._mode == CONNECTION_MODE_LIVE:
+            self.hass.async_create_task(self._async_poll_all())
+            return
+        self._stop_polling()
+        self._start_session_polling()  # 5 s fast poll + an immediate full poll
+        self._reset_live_timer(WRITE_LINGER_SECONDS)
+        self.status = STATUS_LIVE
+        self._notify_listeners()
 
     def register_listener(self, callback_fn) -> None:
         self._listeners.append(callback_fn)
@@ -373,7 +467,14 @@ class SolarTouchLANCoordinator:
         self.next_poll_in = 0
         self._stop_polling()
         await self.client.async_disconnect()
-        self.status = STATUS_STANDBY
+        # Restore the mode's normal polling. After a Periodic-mode write burst
+        # this resumes periodic polling; in Standby (e.g. Go Live ending) it
+        # stays idle.
+        if self._mode == CONNECTION_MODE_LIVE:
+            self._start_live_polling()
+        elif self._mode == CONNECTION_MODE_PERIODIC:
+            self._start_periodic_polling()
+        self.status = self._idle_status()
         self._notify_listeners()
 
     # ── Daily cloud sync ──────────────────────────────────────────────────────

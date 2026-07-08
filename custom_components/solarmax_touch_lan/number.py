@@ -63,10 +63,13 @@ class SolarTouchNumber(NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         int_value = int(value)
         is_uint32 = self._defn["data_type"] == "uint32"
-        await self._coordinator.async_write_register(
+        success = await self._coordinator.async_write_register(
             self._defn["register"], int_value, uint32=is_uint32
         )
-        self._coordinator.data[self._defn["key"]] = value
+        # Only reflect the new value once the write is confirmed; otherwise leave
+        # the entity showing the last known value so a failed write is visible.
+        if success:
+            self._coordinator.data[self._defn["key"]] = value
         self.async_write_ha_state()
 
 

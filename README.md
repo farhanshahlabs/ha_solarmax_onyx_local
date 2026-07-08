@@ -2,6 +2,12 @@
 
 Local Modbus TCP integration for **SolarMax Onyx hybrid inverters** — no cloud, no internet required.
 
+> [!WARNING]
+> **DISCLAIMER: Use at your own risk! Especially when writing any settings.**
+
+> [!NOTE]
+> The SolarMax Onyx is an OEM/rebranded inverter (originally manufactured by Senergytec). Other rebrands of the same hardware — such as the **Cellcronic Galaxy 7G** and **Senergy SE-KHB** series — may also work, provided they use a compatible Modbus register map / protocol version. Register layouts can differ between models and firmware versions, so verify against your specific unit before relying on it (especially for writes).
+
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![Validate](https://github.com/farhanshahlabs/ha_solarmax_onyx_local/actions/workflows/validate.yml/badge.svg)](https://github.com/farhanshahlabs/ha_solarmax_onyx_local/actions/workflows/validate.yml)
 
