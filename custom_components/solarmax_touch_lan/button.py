@@ -5,11 +5,13 @@ from __future__ import annotations
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import SolarTouchLANCoordinator
-from .sensor import _device_info
+from .entity import device_info as _device_info
 
 
 async def async_setup_entry(
@@ -20,6 +22,7 @@ async def async_setup_entry(
         RefreshButton(coordinator, entry),
         GoLiveButton(coordinator, entry),
         PauseSyncButton(coordinator, entry),
+        SyncClockButton(coordinator, entry),
     ])
 
 
@@ -63,3 +66,21 @@ class PauseSyncButton(ButtonEntity):
 
     async def async_press(self) -> None:
         await self._coordinator.async_pause_sync()
+
+
+class SyncClockButton(ButtonEntity):
+    """Set the inverter clock to Home Assistant's local time."""
+
+    _attr_has_entity_name = True
+    _attr_name = "4. Sync Inverter Clock"
+    _attr_icon = "mdi:clock-check-outline"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_sync_clock"
+        self._attr_device_info = _device_info(entry)
+
+    async def async_press(self) -> None:
+        if not await self._coordinator.async_sync_clock():
+            raise HomeAssistantError("The inverter did not confirm the new time; see the log")

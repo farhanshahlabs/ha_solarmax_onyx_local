@@ -16,6 +16,15 @@
           "connection_mode": "Standby is recommended. Periodic polls on a schedule. Live polls every 30 s.",
           "daily_cloud_sync": "Lets the inverter send one daily data point to cloudinverter.net at end of day"
         }
+      },
+      "reconfigure": {
+        "title": "Change inverter address",
+        "description": "Update the inverter's network address. Entities, history and settings are kept.",
+        "data": {
+          "host": "Inverter IP Address",
+          "port": "Modbus TCP port",
+          "slave": "Modbus slave ID"
+        }
       }
     },
     "error": {
@@ -23,7 +32,19 @@
       "unknown": "Unexpected error. Check the Home Assistant logs."
     },
     "abort": {
-      "already_configured": "This inverter is already configured."
+      "already_configured": "This inverter is already configured.",
+      "reconfigure_successful": "The inverter address was updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "SolarTouch LAN options",
+        "data": {
+          "daily_cloud_sync": "Pause daily at 23:45 to allow cloud sync (6 min)",
+          "auto_clock_sync": "Sync the inverter clock to Home Assistant every night (03:07)"
+        }
+      }
     }
   }
 }

@@ -118,6 +118,122 @@ Writable inverter registers — changes are written directly to the inverter via
 | Max Grid Export Power | Number |
 | Smart Load Turn ON Battery SOC | Number |
 | Smart Load Turn OFF Battery SOC | Number |
+| Inverter Rated Power | Number (kW) — caps the export, grid charging and battery charging power settings |
+
+### Reliable writes — set it once
+
+The inverter shares its single Modbus connection with the cloud uploader, so a
+write can fail simply because the cloud is connected at that moment. You do not
+need to repeat actions with delays in your automations:
+
+- Setting a value **returns immediately** and is queued.
+- The integration keeps reconnecting with backoff, writes the register and
+  **reads it back to confirm**, for up to 15 minutes (including across the
+  nightly cloud sync pause).
+- While waiting, the entity keeps showing the inverter's actual value and the
+  requested one is in its `pending_value` attribute. The Connection Status
+  sensor lists all `pending_writes`.
+- Setting the same control again replaces the pending value (latest wins).
+- On success a `solarmax_touch_lan_write_confirmed` event fires. If the inverter
+  never confirms, a `solarmax_touch_lan_write_failed` event fires and a
+  persistent notification is shown.
+
+```yaml
+# Example: get notified when a write fails
+trigger:
+  - platform: event
+    event_type: solarmax_touch_lan_write_failed
+action:
+  - service: notify.notify
+    data:
+      message: "Inverter: could not set {{ trigger.event.data.name }} to {{ trigger.event.data.value }}"
+```
+
+### Inverter model and rated power
+
+At startup the integration reads the inverter's device-info block (model,
+serial number, firmware, rated power) and shows it on the device page. The
+rated power sets the maximum of the export, grid charging and battery charging
+power controls. If you set **11. Inverter Rated Power** by hand, your value is
+kept and auto-detection no longer changes it.
+
+### Status, alerts, battery/BMS and backup sensors
+
+Added sensors (new entities only; existing entities are unchanged):
+
+| Sensor | Notes |
+|---|---|
+| 50. Inverter Status | Initializing / Standby / On-grid / Off-grid / Fault / Shutdown |
+| 51. Active Alerts | Number of active alerts; the `alerts` attribute lists them (e.g. "Grid absent", "Battery under voltage") |
+| 52. Battery Health (SOH) | Matches the portal's "Battery Health Status" (register not in the official protocol) |
+| 53–55. Battery Capacity, Battery Type, BMS Status | Diagnostic |
+| 56–59. BMS charge/discharge voltage and current limits | Diagnostic |
+| 60–63. Backup (EPS) voltage, current, frequency, energy today | |
+| 64–65. Grid voltage and current | |
+| 66–67. Home load energy today / lifetime | |
+
+The device page also shows the master, slave and CSB firmware versions.
+
+### More settings
+
+| Control | Type |
+|---|---|
+| 12. Max Battery Discharge Power | Number (capped at the inverter rating) |
+| 13. / 14. Force Charge Start / End SOC | Number |
+| 15. Grid Charging | Switch |
+| 16. Time Control Repeat | Select (Once / Every day) |
+| 17.–20. Charge / Discharge Start and End Time | Time (used in *Time-based Control* mode) |
+| 4. Sync Inverter Clock | Button: sets the inverter clock to Home Assistant's local time |
+
+All of them use the same queued, verified writes as the other controls.
+**08. Inverter Clock** shows the inverter's clock and an `offset_seconds`
+attribute. Make sure Home Assistant's time zone matches the inverter's
+location before syncing the clock.
+
+### Changing settings later
+
+- **Change the inverter's IP address / port / slave ID:** Settings → Devices &
+  services → SolarTouch LAN → ⋮ → **Reconfigure**. Entities and history are kept.
+- **Options** (Configure): daily cloud-sync pause, and an automatic nightly
+  clock sync (03:07).
+- **Diagnostics:** ⋮ → *Download diagnostics* gives a file for bug reports
+  (IP address, serial and names are removed).
+
+### Poll timing sensors
+
+**06. Next Poll At** and **07. Last Successful Poll** are timestamp sensors.
+The older countdown sensors (01–03) still work but update every second, which
+writes a lot to the database; new installs get them disabled by default.
+
+### Dashboard card
+
+A card is bundled with the integration and loaded automatically — nothing to
+install. Add it from the card picker (**SolarMax Onyx**) or in YAML:
+
+```yaml
+type: custom:solarmax-onyx-card
+# all optional:
+entry_id: <config entry id>   # defaults to the first inverter
+title: My inverter
+theme: auto                   # auto (follow Home Assistant) | dark | light
+range: 24h                    # 6h | 24h | 3d | 7d
+series: [solar, home, grid, battery, soc]
+```
+
+It shows live solar, home, grid and battery power, battery SOC and
+temperatures, today's energy totals, and one interactive chart. Click the
+chips to show/hide series, pick a time range, and hover the chart for values.
+Home consumption is calculated as solar + grid import − battery charging.
+
+### Spike filtering
+
+The inverter returns all-ones "no data" values (0xFFFF / 0xFFFFFFFF) when a
+register is not populated. These are discarded for every sensor, so charts no
+longer jump to 65,535 or 42,949,672 kWh. Lifetime energy counters additionally
+ignore readings that go down or jump by more than 500 units between polls,
+unless the new level persists for 3 polls (a genuine counter reset). Spikes
+recorded before this fix can be corrected under **Developer Tools → Statistics**.
+
 
 ---
 

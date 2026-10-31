@@ -8,6 +8,11 @@ CONF_SLAVE = "slave"
 CONF_CONNECTION_MODE = "connection_mode"
 CONF_DAILY_CLOUD_SYNC = "daily_cloud_sync"
 CONF_PERIODIC_INTERVAL = "periodic_interval"
+CONF_RATED_POWER = "rated_power_kw"
+CONF_RATED_POWER_MANUAL = "rated_power_manual"   # True once the user sets it by hand
+CONF_MODEL = "model"
+CONF_SERIAL = "serial"
+CONF_SW_VERSION = "sw_version"
 
 CONNECTION_MODE_STANDBY = "standby"
 CONNECTION_MODE_PERIODIC = "periodic"
@@ -15,6 +20,24 @@ CONNECTION_MODE_LIVE = "live"
 CONNECTION_MODE_ALWAYS_ON = CONNECTION_MODE_LIVE  # legacy alias
 
 PERIODIC_INTERVAL_DEFAULT = 5  # minutes
+
+# Inverter rated AC power. Caps the power settings (export, grid charging,
+# battery charging) so they cannot exceed what the inverter can deliver.
+# Read from the inverter's device-info block at startup unless the user has
+# set it by hand; falls back to the old fixed 10 kW cap if it cannot be read.
+RATED_POWER_DEFAULT_KW = 10.0
+RATED_POWER_MIN_KW = 1.0
+RATED_POWER_MAX_KW = 30.0
+
+# Device-info block (protocol 0x1A00..0x1A48), read once at startup.
+DEVICE_INFO_REGISTER = 0x1A00
+DEVICE_INFO_COUNT = 0x49
+DEVICE_INFO_MODEL = (0x00, 8)          # ASCII, e.g. "SM-ONYX-UL-10KW"
+DEVICE_INFO_SERIAL = (0x10, 8)         # ASCII
+DEVICE_INFO_MASTER_FW = (0x1C, 3)      # ASCII
+DEVICE_INFO_SLAVE_FW = (0x26, 3)       # ASCII
+DEVICE_INFO_EMS_FW_REGISTER = 0x1A60   # 3 regs ASCII; the portal calls it "CSB Version"
+DEVICE_INFO_RATED_POWER = 0x46         # U16, W
 
 LIVE_SESSION_SECONDS = 300       # 5 minutes
 WRITE_LINGER_SECONDS = 30        # fast-poll burst after a write so the effect is visible immediately
@@ -28,6 +51,62 @@ SCAN_SLOW_SECONDS = 60
 
 SLAVE_DEFAULT = 1
 PORT_DEFAULT = 502
+
+
+# ── Status and alert tables (Modbus protocol V4.25, checked against the portal)
+INVERTER_STATUS_OPTIONS = {
+    0: "Initializing",
+    1: "Standby",
+    3: "On-grid",
+    4: "Off-grid",
+    5: "Fault",
+    9: "Shutdown",
+}
+
+BATTERY_TYPE_OPTIONS = {
+    0: "None",
+    1: "Lead-acid",
+    2: "PYLON",
+    3: "Dyness",
+    4: "Aobo",
+    5: "UZ",
+    6: "VestMoods",
+    7: "XinYi",
+}
+
+# data key -> bit descriptions (bit 0 first). "" = reserved bit.
+ALERT_BITS = {
+    "error_code_1": [  # 0x101E
+        "Inverter over DC-bias current", "Inverter relay abnormal", "Remote off",
+        "Inverter over temperature", "GFCI abnormal", "PV string reverse",
+        "System type error", "Fan abnormal", "Unbalanced DC-link voltage",
+        "DC-link over voltage", "Internal communication error", "Software incompatibility",
+        "Internal storage error", "Data inconsistency", "Inverter abnormal", "Boost abnormal",
+    ],
+    "error_code_2": [  # 0x101F
+        "Grid over voltage", "Grid under voltage", "Grid absent", "Grid over frequency",
+        "Grid under frequency", "PV over voltage", "PV insulation abnormal",
+        "Leakage current abnormal", "Power limited", "Internal power supply abnormal",
+        "PV string abnormal", "PV under voltage", "PV irradiation weak", "Grid abnormal",
+        "Arc fault detected", "Grid over mean voltage",
+    ],
+    "error_code_3": [  # 0x1020
+        "", "Logger/display EEPROM fail", "Arc fault detected", "PID device abnormal",
+        "AFCI lost", "Data logger lost", "Meter lost", "Inverter lost", "Grid N abnormal",
+        "Surge protection device defective", "Parallel ID warning",
+        "Parallel sync signal warning", "Parallel battery abnormal", "Parallel grid abnormal",
+        "Generator voltage abnormal", "",
+    ],
+    "error_code_4": [  # 0x2013
+        "Battery absent", "Battery over voltage", "Battery under voltage",
+        "Battery discharge over current", "Battery over temperature",
+        "Battery under temperature", "Neutral/live wire reversed",
+        "Backup output voltage abnormal", "Inverter-BMS communication error",
+        "Internal communication loss (E-M)", "Internal communication loss (M-D)",
+        "DC-DC abnormal", "Backup over DC-bias voltage", "Backup short circuit",
+        "Backup overload", "",
+    ],
+}
 
 # ── Sensor definitions ────────────────────────────────────────────────────────
 # (name, unique_id, register, data_type, scale, unit, device_class, state_class,
@@ -192,25 +271,29 @@ SENSOR_DEFINITIONS = [
     {
         "name": "38. Load Power",
         "key": "load_power",
-        "register": 4875,
+        # Protocol 0x130A Phase R watt of load (S32). Was 4875 word-swapped, straddling phase R/S.
+        "register": 4874,
         "data_type": "int32",
         "scale": 0.1,
         "unit": "W",
         "device_class": SensorDeviceClass.POWER,
         "state_class": SensorStateClass.MEASUREMENT,
-        "swap": True,
+        "swap": False,
         "fast": True,
     },
     {
         "name": "30. Grid Power",
         "key": "grid_power",
-        "register": 4865,
+        # Protocol: 0x1300 "Phase R watt of grid", S32, 0.1 W. It was read
+        # from 4865 word-swapped, straddling phase R and phase S, which gave
+        # bogus values whenever grid power went negative.
+        "register": 4864,
         "data_type": "int32",
         "scale": 0.1,
         "unit": "W",
         "device_class": SensorDeviceClass.POWER,
         "state_class": SensorStateClass.MEASUREMENT,
-        "swap": True,
+        "swap": False,
         "fast": True,
     },
     {
@@ -265,13 +348,16 @@ SENSOR_DEFINITIONS = [
     {
         "name": "24. Battery Current",
         "key": "battery_current",
-        "register": 8200,
+        # Protocol: 0x2007, S32, 0.01 A, high word first. It was read from 8200
+        # word-swapped, which pulled in the high word of Battery Power (8201)
+        # and showed e.g. -654 A while discharging.
+        "register": 8199,
         "data_type": "int32",
         "scale": 0.01,
         "unit": "A",
         "device_class": SensorDeviceClass.CURRENT,
         "state_class": SensorStateClass.MEASUREMENT,
-        "swap": True,
+        "swap": False,
         "fast": False,
     },
     {
@@ -505,25 +591,27 @@ SENSOR_DEFINITIONS = [
     {
         "name": "44. Energy Produced Lifetime",
         "key": "energy_produced_lifetime",
-        "register": 4130,
+        # Protocol 0x1021 Total Energy (U32, high word first). Was 4130 swapped, borrowing the hours register as its high word.
+        "register": 4129,
         "data_type": "uint32",
         "scale": 1,
         "unit": "kWh",
         "device_class": SensorDeviceClass.ENERGY,
         "state_class": SensorStateClass.TOTAL_INCREASING,
-        "swap": True,
+        "swap": False,
         "fast": False,
     },
     {
         "name": "48. Inverter Operating Hours",
         "key": "inverter_operating_hours",
-        "register": 4132,
+        # Protocol 0x1023 (U32, high word first). Was 4132 swapped.
+        "register": 4131,
         "data_type": "uint32",
         "scale": 1,
         "unit": "h",
         "device_class": SensorDeviceClass.DURATION,
         "state_class": SensorStateClass.TOTAL_INCREASING,
-        "swap": True,
+        "swap": False,
         "fast": False,
     },
     {
@@ -553,13 +641,14 @@ SENSOR_DEFINITIONS = [
     {
         "name": "34. Energy Import Today",
         "key": "energy_import_today",
-        "register": 4915,
+        # Protocol 0x1332 (U32, high word first). Was 4915 swapped; only correct while 4916 was 0.
+        "register": 4914,
         "data_type": "uint32",
         "scale": 0.01,
         "unit": "kWh",
         "device_class": SensorDeviceClass.ENERGY,
         "state_class": SensorStateClass.TOTAL,
-        "swap": True,
+        "swap": False,
         "fast": False,
     },
     {
@@ -577,19 +666,21 @@ SENSOR_DEFINITIONS = [
     {
         "name": "36. Energy Export Today",
         "key": "energy_export_today",
-        "register": 4917,
+        # Protocol 0x1334 (U32, high word first). Was 4917 swapped.
+        "register": 4916,
         "data_type": "uint32",
         "scale": 0.01,
         "unit": "kWh",
         "device_class": SensorDeviceClass.ENERGY,
         "state_class": SensorStateClass.TOTAL,
-        "swap": True,
+        "swap": False,
         "fast": False,
     },
     {
         "name": "39. Load Voltage",
         "key": "load_voltage",
-        "register": 4900,
+        # Protocol 0x1323 L1-N load voltage. 4900 is L2, always 0 on single-phase units.
+        "register": 4899,
         "data_type": "uint16",
         "scale": 0.1,
         "unit": "V",
@@ -601,13 +692,14 @@ SENSOR_DEFINITIONS = [
     {
         "name": "40. Load Current",
         "key": "load_current",
-        "register": 4904,
+        # Protocol 0x1326 L1 load current (S32). 4904 is L2.
+        "register": 4902,
         "data_type": "int32",
         "scale": 0.01,
         "unit": "A",
         "device_class": SensorDeviceClass.CURRENT,
         "state_class": SensorStateClass.MEASUREMENT,
-        "swap": True,
+        "swap": False,
         "fast": False,
     },
     {
@@ -623,8 +715,9 @@ SENSOR_DEFINITIONS = [
         "fast": False,
     },
     {
-        "name": "31. Grid Export Power",
+        "name": "31. Inverter AC Output Power",
         "key": "grid_export_power",
+        # Protocol 0x1003 Phase A Power: the inverter's AC output, not grid export. Key kept so the entity ID is unchanged.
         "register": 4099,
         "data_type": "int32",
         "scale": 0.1,
@@ -658,10 +751,480 @@ SENSOR_DEFINITIONS = [
         "swap": False,
         "fast": False,
     },
+    # ── Added after comparing with the cloudinverter.net portal ──────────────
+    # Each value was checked against the portal and live reads. Appended only:
+    # existing keys and unique IDs are unchanged.
+    {
+        "name": "50. Inverter Status",
+        "key": "inverter_status",
+        "register": 4125,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": SensorDeviceClass.ENUM,
+        "state_class": None,
+        "swap": False,
+        "fast": True,
+        "options": INVERTER_STATUS_OPTIONS,
+    },
+    {
+        "name": "Error Code 1 (raw)",
+        "key": "error_code_1",
+        "register": 4126,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": True,
+        "entity": False,
+    },
+    {
+        "name": "Error Code 2 (raw)",
+        "key": "error_code_2",
+        "register": 4127,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": True,
+        "entity": False,
+    },
+    {
+        "name": "Error Code 3 (raw)",
+        "key": "error_code_3",
+        "register": 4128,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": True,
+        "entity": False,
+    },
+    {
+        "name": "Error Code 4 (raw)",
+        "key": "error_code_4",
+        "register": 8211,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": True,
+        "entity": False,
+    },
+    {
+        "name": "52. Battery Health (SOH)",
+        "key": "battery_health",
+        "register": 8214,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": "%",
+        "device_class": None,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "swap": False,
+        "fast": False,
+    },
+    {
+        "name": "53. Battery Capacity",
+        "key": "battery_capacity",
+        "register": 8246,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": "Ah",
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "category": "diagnostic",
+        "min": 1,
+        "max": 10000,
+    },
+    {
+        "name": "54. Battery Type",
+        "key": "battery_type",
+        "register": 8464,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": SensorDeviceClass.ENUM,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "category": "diagnostic",
+        "options": BATTERY_TYPE_OPTIONS,
+    },
+    {
+        "name": "55. BMS Status",
+        "key": "bms_status",
+        "register": 8194,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "category": "diagnostic",
+    },
+    {
+        "name": "56. BMS Charge Voltage Limit",
+        "key": "bms_charge_voltage_limit",
+        "register": 8240,
+        "data_type": "uint16",
+        "scale": 0.1,
+        "unit": "V",
+        "device_class": SensorDeviceClass.VOLTAGE,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "swap": False,
+        "fast": False,
+        "category": "diagnostic",
+    },
+    {
+        "name": "57. BMS Discharge Voltage Limit",
+        "key": "bms_discharge_voltage_limit",
+        "register": 8241,
+        "data_type": "uint16",
+        "scale": 0.1,
+        "unit": "V",
+        "device_class": SensorDeviceClass.VOLTAGE,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "swap": False,
+        "fast": False,
+        "category": "diagnostic",
+    },
+    {
+        "name": "58. BMS Charge Current Limit",
+        "key": "bms_charge_current_limit",
+        "register": 8243,
+        "data_type": "uint16",
+        "scale": 0.01,
+        "unit": "A",
+        "device_class": SensorDeviceClass.CURRENT,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "swap": False,
+        "fast": False,
+        "category": "diagnostic",
+    },
+    {
+        "name": "59. BMS Discharge Current Limit",
+        "key": "bms_discharge_current_limit",
+        "register": 8245,
+        "data_type": "uint16",
+        "scale": 0.01,
+        "unit": "A",
+        "device_class": SensorDeviceClass.CURRENT,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "swap": False,
+        "fast": False,
+        "category": "diagnostic",
+    },
+    {
+        "name": "60. Backup Voltage",
+        "key": "backup_voltage",
+        "register": 4944,
+        "data_type": "uint16",
+        "scale": 0.1,
+        "unit": "V",
+        "device_class": SensorDeviceClass.VOLTAGE,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "swap": False,
+        "fast": True,
+    },
+    {
+        "name": "61. Backup Current",
+        "key": "backup_current",
+        "register": 4945,
+        "data_type": "int32",
+        "scale": 0.01,
+        "unit": "A",
+        "device_class": SensorDeviceClass.CURRENT,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "swap": False,
+        "fast": True,
+    },
+    {
+        "name": "62. Backup Frequency",
+        "key": "backup_frequency",
+        "register": 4949,
+        "data_type": "uint16",
+        "scale": 0.01,
+        "unit": "Hz",
+        "device_class": SensorDeviceClass.FREQUENCY,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "swap": False,
+        "fast": False,
+    },
+    {
+        "name": "63. Backup Energy Today",
+        "key": "backup_energy_today",
+        "register": 4960,
+        "data_type": "uint32",
+        "scale": 0.01,
+        "unit": "kWh",
+        "device_class": SensorDeviceClass.ENERGY,
+        "state_class": SensorStateClass.TOTAL,
+        "swap": False,
+        "fast": False,
+    },
+    {
+        "name": "64. Grid Voltage",
+        "key": "grid_voltage",
+        "register": 4890,
+        "data_type": "uint16",
+        "scale": 0.1,
+        "unit": "V",
+        "device_class": SensorDeviceClass.VOLTAGE,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "swap": False,
+        "fast": True,
+    },
+    {
+        "name": "65. Grid Current",
+        "key": "grid_current",
+        "register": 4893,
+        "data_type": "int32",
+        "scale": 0.01,
+        "unit": "A",
+        "device_class": SensorDeviceClass.CURRENT,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "swap": False,
+        "fast": True,
+    },
+    {
+        "name": "66. Home Load Energy Today",
+        "key": "load_energy_today",
+        "register": 4918,
+        "data_type": "uint32",
+        "scale": 0.01,
+        "unit": "kWh",
+        "device_class": SensorDeviceClass.ENERGY,
+        "state_class": SensorStateClass.TOTAL,
+        "swap": False,
+        "fast": False,
+    },
+    {
+        "name": "67. Home Load Energy Lifetime",
+        "key": "load_energy_lifetime",
+        "register": 4880,
+        "data_type": "uint32",
+        "scale": 0.01,
+        "unit": "kWh",
+        "device_class": SensorDeviceClass.ENERGY,
+        "state_class": SensorStateClass.TOTAL_INCREASING,
+        "swap": False,
+        "fast": False,
+    },
+    # ── Read-back values for settings controls (no sensor entity of their own)
+    {
+        "name": "time_control_everyday",
+        "key": "time_control_everyday",
+        "register": 8449,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
+    {
+        "name": "charge_start_time",
+        "key": "charge_start_time",
+        "register": 8450,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
+    {
+        "name": "charge_end_time",
+        "key": "charge_end_time",
+        "register": 8451,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
+    {
+        "name": "discharge_start_time",
+        "key": "discharge_start_time",
+        "register": 8452,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
+    {
+        "name": "discharge_end_time",
+        "key": "discharge_end_time",
+        "register": 8453,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
+    {
+        "name": "grid_charge_enable",
+        "key": "grid_charge_enable",
+        "register": 8469,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
+    {
+        "name": "max_discharge_power",
+        "key": "max_discharge_power",
+        "register": 8474,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": "W",
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
+    {
+        "name": "force_charge_start_soc",
+        "key": "force_charge_start_soc",
+        "register": 8516,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": "%",
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
+    {
+        "name": "force_charge_end_soc",
+        "key": "force_charge_end_soc",
+        "register": 8517,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": "%",
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
+    {
+        "name": "clock_year",
+        "key": "clock_year",
+        "register": 12288,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
+    {
+        "name": "clock_month_day",
+        "key": "clock_month_day",
+        "register": 12289,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
+    {
+        "name": "clock_hour_minute",
+        "key": "clock_hour_minute",
+        "register": 12290,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
+    {
+        "name": "clock_second",
+        "key": "clock_second",
+        "register": 12291,
+        "data_type": "uint16",
+        "scale": 1,
+        "unit": None,
+        "device_class": None,
+        "state_class": None,
+        "swap": False,
+        "fast": False,
+        "entity": False,
+    },
 ]
 
 # ── Writable number entities ──────────────────────────────────────────────────
 # (key, name, register, data_type, min, max, step, unit, mode)
+
+# Plausible ranges applied to every sensor that does not set its own min/max.
+# Anything outside is a bad read (wrong word, half-populated register) and is
+# discarded, so it can never spike a chart or the energy statistics.
+_DEFAULT_RANGES_BY_UNIT = {
+    "W": (-30000, 30000),
+    "V": (0, 1000),
+    "A": (-300, 300),
+    "Hz": (0, 70),          # 0 when the grid is absent
+    "°C": (-40, 120),
+    "%": (0, 100),
+    "h": (0, 500000),
+}
+_DEFAULT_RANGE_ENERGY_TODAY = (0, 1000)          # kWh within one day
+_DEFAULT_RANGE_ENERGY_LIFETIME = (0, 5000000)    # kWh over the inverter's life
+
+for _defn in SENSOR_DEFINITIONS:
+    if "min" in _defn or "max" in _defn:
+        continue
+    if _defn["unit"] == "kWh":
+        _range = (
+            _DEFAULT_RANGE_ENERGY_LIFETIME
+            if _defn["state_class"] == SensorStateClass.TOTAL_INCREASING
+            else _DEFAULT_RANGE_ENERGY_TODAY
+        )
+    else:
+        _range = _DEFAULT_RANGES_BY_UNIT.get(_defn["unit"])
+    if _range:
+        _defn["min"], _defn["max"] = _range
+
 NUMBER_DEFINITIONS = [
     {
         "key": "battery_charging_max_power",        # matches sensor key
@@ -669,7 +1232,8 @@ NUMBER_DEFINITIONS = [
         "register": 8472,
         "data_type": "uint16",
         "min": 100,
-        "max": 10000,
+        "max": 10000,           # replaced by the inverter rating at runtime
+        "max_from_rated_power": True,
         "step": 50,
         "unit": "W",
     },
@@ -679,7 +1243,8 @@ NUMBER_DEFINITIONS = [
         "register": 8470,
         "data_type": "uint16",
         "min": 100,
-        "max": 10000,
+        "max": 10000,           # replaced by the inverter rating at runtime
+        "max_from_rated_power": True,
         "step": 50,
         "unit": "W",
     },
@@ -724,12 +1289,14 @@ NUMBER_DEFINITIONS = [
         "unit": "%",
     },
     {
-        "key": "max_grid_export_power",              # matches sensor key
+        "key": "max_grid_export_power",
+        # 0 = zero export              # matches sensor key
         "name": "02. Max Grid Export Power",
         "register": 12473,
         "data_type": "uint32",
-        "min": 100,
-        "max": 10000,
+        "min": 0,
+        "max": 10000,           # replaced by the inverter rating at runtime
+        "max_from_rated_power": True,
         "step": 100,
         "unit": "W",
     },
@@ -749,8 +1316,39 @@ NUMBER_DEFINITIONS = [
         "register": 8493,
         "data_type": "uint16",
         "min": 15,
-        "max": 80,
+        "max": 95,
         "step": 5,
+        "unit": "%",
+    },
+    {
+        "key": "max_discharge_power",
+        "name": "12. Max Battery Discharge Power",
+        "register": 8474,
+        "data_type": "uint16",
+        "min": 100,
+        "max": 10000,           # replaced by the inverter rating at runtime
+        "max_from_rated_power": True,
+        "step": 50,
+        "unit": "W",
+    },
+    {
+        "key": "force_charge_start_soc",
+        "name": "13. Force Charge Start SOC",
+        "register": 8516,
+        "data_type": "uint16",
+        "min": 5,
+        "max": 100,
+        "step": 1,
+        "unit": "%",
+    },
+    {
+        "key": "force_charge_end_soc",
+        "name": "14. Force Charge End SOC",
+        "register": 8517,
+        "data_type": "uint16",
+        "min": 5,
+        "max": 100,
+        "step": 1,
         "unit": "%",
     },
 ]
@@ -762,3 +1360,23 @@ OPERATION_MODE_OPTIONS = {
     "Back-up Mode": 3,
 }
 OPERATION_MODE_REGISTER = 8448
+
+
+# ── Other writable settings ───────────────────────────────────────────────────
+GRID_CHARGE_REGISTER = 8469            # 0 = disabled, 1 = enabled
+TIME_CONTROL_REPEAT_REGISTER = 8449    # 0 = once, 1 = every day
+TIME_CONTROL_REPEAT_OPTIONS = {"Once": 0, "Every day": 1}
+# Time-based control window 1: high byte = hour, low byte = minute.
+TIME_SETTINGS = [
+    # (data key, entity name, register)
+    ("charge_start_time", "17. Charge Start Time", 8450),
+    ("charge_end_time", "18. Charge End Time", 8451),
+    ("discharge_start_time", "19. Discharge Start Time", 8452),
+    ("discharge_end_time", "20. Discharge End Time", 8453),
+]
+
+# Inverter clock: year, month<<8|day, hour<<8|minute, second<<8, in local time.
+CLOCK_REGISTER = 0x3000
+CONF_AUTO_CLOCK_SYNC = "auto_clock_sync"
+CLOCK_SYNC_HOUR = 3                    # daily automatic sync time (local)
+CLOCK_SYNC_TOLERANCE_SECONDS = 10

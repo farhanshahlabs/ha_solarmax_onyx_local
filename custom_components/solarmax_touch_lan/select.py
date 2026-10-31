@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.select import SelectEntity
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.config_entries import ConfigEntry
@@ -15,9 +17,11 @@ from .const import (
     CONNECTION_MODE_LIVE,
     CONNECTION_MODE_PERIODIC,
     CONNECTION_MODE_STANDBY,
+    TIME_CONTROL_REPEAT_OPTIONS,
+    TIME_CONTROL_REPEAT_REGISTER,
 )
 from .coordinator import SolarTouchLANCoordinator
-from .sensor import _device_info
+from .entity import SolarTouchEntity, device_info as _device_info
 
 _MODE_BY_VALUE = {v: k for k, v in OPERATION_MODE_OPTIONS.items()}
 
@@ -33,14 +37,13 @@ async def async_setup_entry(
     async_add_entities([
         SyncModeSelect(coordinator, entry),
         InverterOperationModeSelect(coordinator, entry),
+        TimeControlRepeatSelect(coordinator, entry),
     ])
 
 
-class SyncModeSelect(SelectEntity):
+class SyncModeSelect(SolarTouchEntity, SelectEntity):
     """Dropdown to switch between Standby, Periodic, and Live modes."""
 
-    _attr_has_entity_name = True
-    _attr_should_poll = False
     _attr_name = "4. Sync Mode"
     _attr_icon = "mdi:sync"
     _attr_options = [SYNC_MODE_STANDBY, SYNC_MODE_PERIODIC, SYNC_MODE_LIVE]
@@ -49,16 +52,6 @@ class SyncModeSelect(SelectEntity):
         self._coordinator = coordinator
         self._attr_unique_id = f"{entry.entry_id}_sync_mode"
         self._attr_device_info = _device_info(entry)
-
-    async def async_added_to_hass(self) -> None:
-        self._coordinator.register_listener(self._handle_update)
-
-    async def async_will_remove_from_hass(self) -> None:
-        self._coordinator.unregister_listener(self._handle_update)
-
-    @callback
-    def _handle_update(self) -> None:
-        self.async_write_ha_state()
 
     @property
     def current_option(self) -> str:
@@ -77,9 +70,7 @@ class SyncModeSelect(SelectEntity):
             await self._coordinator.async_set_mode(CONNECTION_MODE_STANDBY)
 
 
-class InverterOperationModeSelect(SelectEntity):
-    _attr_has_entity_name = True
-    _attr_should_poll = False
+class InverterOperationModeSelect(SolarTouchEntity, SelectEntity):
     _attr_name = "01. Inverter Operation Mode"
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:solar-power-variant"
@@ -90,15 +81,10 @@ class InverterOperationModeSelect(SelectEntity):
         self._attr_unique_id = f"{entry.entry_id}_operation_mode"
         self._attr_device_info = _device_info(entry)
 
-    async def async_added_to_hass(self) -> None:
-        self._coordinator.register_listener(self._handle_update)
-
-    async def async_will_remove_from_hass(self) -> None:
-        self._coordinator.unregister_listener(self._handle_update)
-
-    @callback
-    def _handle_update(self) -> None:
-        self.async_write_ha_state()
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        pending = self._coordinator.pending_value(OPERATION_MODE_REGISTER)
+        return {"pending_value": None if pending is None else _MODE_BY_VALUE.get(pending)}
 
     @property
     def current_option(self) -> str | None:
@@ -111,9 +97,41 @@ class InverterOperationModeSelect(SelectEntity):
         value = OPERATION_MODE_OPTIONS.get(option)
         if value is None:
             return
-        success = await self._coordinator.async_write_register(
-            OPERATION_MODE_REGISTER, value
+        # Queued and retried in the background until the inverter confirms it.
+        self._coordinator.async_request_write(
+            self._attr_name,
+            OPERATION_MODE_REGISTER,
+            value,
+            data_key="inverter_operation_mode_raw",
         )
-        if success:
-            self._coordinator.data["inverter_operation_mode_raw"] = value
-        self.async_write_ha_state()
+
+
+class TimeControlRepeatSelect(SolarTouchEntity, SelectEntity):
+    """Whether the time-based control window runs once or every day."""
+
+    _attr_name = "16. Time Control Repeat"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:calendar-sync"
+    _attr_options = list(TIME_CONTROL_REPEAT_OPTIONS)
+    _key = "time_control_everyday"
+
+    def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_time_control_repeat"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def current_option(self) -> str | None:
+        raw = self._coordinator.data.get(self._key)
+        if raw is None:
+            return None
+        return next((k for k, v in TIME_CONTROL_REPEAT_OPTIONS.items() if v == int(raw)), None)
+
+    async def async_select_option(self, option: str) -> None:
+        # Queued and retried in the background until the inverter confirms it.
+        self._coordinator.async_request_write(
+            self._attr_name,
+            TIME_CONTROL_REPEAT_REGISTER,
+            TIME_CONTROL_REPEAT_OPTIONS[option],
+            data_key=self._key,
+        )

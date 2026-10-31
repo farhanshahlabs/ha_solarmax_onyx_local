@@ -1,51 +1,58 @@
-"""Switch platform for SolarTouch LAN — connection mode toggle."""
+"""Switch platform for SolarTouch LAN — on/off inverter settings."""
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, CONNECTION_MODE_ALWAYS_ON, CONNECTION_MODE_STANDBY
+from .const import DOMAIN, GRID_CHARGE_REGISTER
 from .coordinator import SolarTouchLANCoordinator
-from .sensor import _device_info
+from .entity import SolarTouchEntity, device_info
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: SolarTouchLANCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([ConnectionModeSwitch(coordinator, entry)])
+    async_add_entities([GridChargeSwitch(coordinator, entry)])
 
 
-class ConnectionModeSwitch(SwitchEntity):
-    _attr_has_entity_name = True
-    _attr_should_poll = False
-    _attr_name = "6. Live Mode"
-    _attr_icon = "mdi:refresh-auto"
+class GridChargeSwitch(SolarTouchEntity, SwitchEntity):
+    """Allow the battery to charge from the grid."""
+
+    _attr_name = "15. Grid Charging"
+    _attr_icon = "mdi:transmission-tower-import"
+    _attr_entity_category = EntityCategory.CONFIG
+    _key = "grid_charge_enable"
 
     def __init__(self, coordinator: SolarTouchLANCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
-        self._attr_unique_id = f"{entry.entry_id}_always_on_mode"
-        self._attr_device_info = _device_info(entry)
-
-    async def async_added_to_hass(self) -> None:
-        self._coordinator.register_listener(self._handle_update)
-
-    async def async_will_remove_from_hass(self) -> None:
-        self._coordinator.unregister_listener(self._handle_update)
-
-    @callback
-    def _handle_update(self) -> None:
-        self.async_write_ha_state()
+        self._attr_unique_id = f"{entry.entry_id}_grid_charge"
+        self._attr_device_info = device_info(entry)
 
     @property
-    def is_on(self) -> bool:
-        return self._coordinator._mode == CONNECTION_MODE_ALWAYS_ON
+    def is_on(self) -> bool | None:
+        value = self._coordinator.data.get(self._key)
+        return None if value is None else bool(value)
 
-    async def async_turn_on(self, **kwargs) -> None:
-        await self._coordinator.async_set_mode(CONNECTION_MODE_ALWAYS_ON)
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        pending = self._coordinator.pending_value(GRID_CHARGE_REGISTER)
+        return {"pending_value": None if pending is None else bool(pending)}
 
-    async def async_turn_off(self, **kwargs) -> None:
-        await self._coordinator.async_set_mode(CONNECTION_MODE_STANDBY)
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self._write(1)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self._write(0)
+
+    def _write(self, value: int) -> None:
+        # Queued and retried in the background until the inverter confirms it.
+        self._coordinator.async_request_write(
+            self._attr_name, GRID_CHARGE_REGISTER, value, data_key=self._key
+        )
