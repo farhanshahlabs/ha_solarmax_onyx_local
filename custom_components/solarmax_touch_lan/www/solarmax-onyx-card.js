@@ -22,7 +22,8 @@ const RANGES = {
   "7d": { hours: 168, period: "hour" },
 };
 
-// Chart series. "home" is derived: solar + grid import - battery charging.
+// Chart series. "home" is derived: solar + grid import − export + battery discharge.
+// Battery power sign convention: positive = discharging, negative = charging.
 const SERIES = [
   { id: "solar", label: "Solar", key: "live_pv_total_power", axis: "w", color: "var(--smo-solar)" },
   { id: "home", label: "Home", axis: "w", color: "var(--smo-home)", derived: true },
@@ -248,10 +249,10 @@ class SolarMaxOnyxCard extends HTMLElement {
     return out;
   }
 
-  // Home consumption = solar + grid import (+) / export (-) − battery charging (+) / discharging (−).
+  // Home consumption = solar + grid import (+) / export (-) + battery discharge (+) / charging (-).
   _home(solar, grid, battery) {
     if (solar == null && grid == null && battery == null) return null;
-    return Math.max(0, (solar || 0) + (grid || 0) - (battery || 0));
+    return Math.max(0, (solar || 0) + (grid || 0) + (battery || 0));
   }
 
   // ── Rendering ─────────────────────────────────────────────────────────────
@@ -346,7 +347,8 @@ class SolarMaxOnyxCard extends HTMLElement {
         <div class="value">${v}<span class="unit">${u}</span></div><div class="note">${note || "&nbsp;"}</div></div>`;
     };
     const gridNote = grid == null ? "" : grid > 5 ? "Importing" : grid < -5 ? "Exporting" : "Idle";
-    const batNote = battery == null ? "" : battery > 5 ? "Charging" : battery < -5 ? "Discharging" : "Idle";
+    // Positive battery power = discharging, negative = charging.
+    const batNote = battery == null ? "" : battery > 5 ? "Discharging" : battery < -5 ? "Charging" : "Idle";
     const socTile = `<div class="tile"><div class="label"><span class="dot" style="background:var(--smo-soc)"></span>SOC</div>
       <div class="value">${soc == null ? "—" : Math.round(soc)}<span class="unit">%</span></div>
       <div class="note">${this._temps()}</div></div>`;

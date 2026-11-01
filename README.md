@@ -223,7 +223,8 @@ series: [solar, home, grid, battery, soc]
 It shows live solar, home, grid and battery power, battery SOC and
 temperatures, today's energy totals, and one interactive chart. Click the
 chips to show/hide series, pick a time range, and hover the chart for values.
-Home consumption is calculated as solar + grid import − battery charging.
+Home consumption is calculated as solar + grid import − export + battery discharge
+(battery power is positive while discharging, negative while charging).
 
 ### Spike filtering
 
