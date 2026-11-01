@@ -1,6 +1,11 @@
 {
   "domain": "solarmax_touch_lan",
   "name": "SolarTouch LAN",
+  "after_dependencies": [
+    "frontend",
+    "http",
+    "websocket_api"
+  ],
   "codeowners": [
     "@farhanshahlabs"
   ],
@@ -12,10 +17,5 @@
   "requirements": [
     "pymodbus>=3.6.0"
   ],
-  "version": "0.3.4",
-  "after_dependencies": [
-    "frontend",
-    "http",
-    "websocket_api"
-  ]
+  "version": "0.3.4"
 }
